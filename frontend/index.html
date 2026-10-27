@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CropSense — Smart Crop Advisory Prototype</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+:root{
+  --bg:#f6f7f2;--card:#fff;--ink:#213127;--muted:#718078;--line:#e3e8df;
+  --green:#557a61;--green2:#dfeadd;--peach:#f3dfcf;--yellow:#f3ebc9;--red:#f2d7d4;--blue:#dce9ec;
+}
+*{box-sizing:border-box} body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
+button,input,select{font:inherit}
+.shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+aside{background:#edf1e9;border-right:1px solid var(--line);padding:24px 18px;position:sticky;top:0;height:100vh}
+.brand{font-weight:800;font-size:20px;margin:0 8px 28px}.brand span{color:var(--green)}
+nav button{width:100%;border:0;background:transparent;text-align:left;padding:11px 12px;border-radius:10px;color:#56655d;margin:3px 0;cursor:pointer}
+nav button.active,nav button:hover{background:#dfe7db;color:#24402d;font-weight:700}
+main{padding:28px;max-width:1500px;width:100%}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.top h1{margin:0;font-size:27px}.top p{margin:5px 0 0;color:var(--muted)}
+.badge{background:var(--green2);padding:8px 12px;border-radius:999px;font-size:13px;font-weight:700}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 5px 18px rgba(35,50,40,.035)}
+.metric{grid-column:span 3}.metric small{color:var(--muted)}.metric strong{display:block;font-size:28px;margin-top:9px}
+.good{color:#4d765a}.warn{color:#9b7427}.danger{color:#a8544d}
+.w7{grid-column:span 7}.w5{grid-column:span 5}.w6{grid-column:span 6}.w12{grid-column:span 12}
+h2{font-size:17px;margin:0 0 15px}.sub{color:var(--muted);font-size:13px}
+.upload{border:1.5px dashed #bac8b7;border-radius:14px;padding:28px;text-align:center;background:#fafcf8}
+.upload input{margin-top:12px;max-width:100%}
+.fields{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+label{font-size:12px;color:var(--muted)}input,select{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px;margin-top:5px;background:#fff;color:var(--ink)}
+.primary{border:0;background:var(--green);color:white;padding:11px 16px;border-radius:10px;font-weight:700;cursor:pointer}
+.primary:hover{filter:brightness(.96)}
+.result{display:none;margin-top:16px}.result.show{display:block}
+.bar{height:8px;background:#edf0eb;border-radius:20px;overflow:hidden;margin:8px 0 3px}.fill{height:100%;background:var(--green);border-radius:20px}
+.alert{border-radius:12px;padding:13px 14px;background:var(--yellow);margin:9px 0;font-size:14px}
+.alert.red{background:var(--red)}.alert.blue{background:var(--blue)}
+.rec{display:flex;gap:10px;margin:11px 0}.dot{width:25px;height:25px;flex:0 0 25px;border-radius:50%;background:var(--green2);display:grid;place-items:center;font-size:12px;font-weight:800}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
+.weather{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.weather div{background:#f7f9f5;border-radius:12px;padding:13px}.weather strong{display:block;font-size:20px;margin-top:4px}
+.page{display:none}.page.active{display:block}
+@media(max-width:900px){.shell{grid-template-columns:1fr}aside{position:relative;height:auto}.metric,.w7,.w5,.w6{grid-column:span 12}.fields{grid-template-columns:repeat(2,1fr)}.weather{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="shell">
+<aside>
+  <div class="brand">Crop<span>Sense</span></div>
+  <nav>
+    <button class="active" data-page="dashboard">Dashboard</button>
+    <button data-page="analysis">Crop Analysis</button>
+    <button data-page="soil">Soil Health</button>
+    <button data-page="weather">Weather</button>
+    <button data-page="advisory">Advisory</button>
+    <button data-page="history">History</button>
+  </nav>
+</aside>
+
+<main>
+<section id="dashboard" class="page active">
+ <div class="top"><div><h1>Farm Overview</h1><p>Multimodal crop health and risk monitoring</p></div><div class="badge">● Prototype data</div></div>
+ <div class="grid">
+  <div class="card metric"><small>Crop Health</small><strong class="good">72%</strong><div class="bar"><div class="fill" style="width:72%"></div></div></div>
+  <div class="card metric"><small>Disease Risk</small><strong class="danger">High · 78%</strong><div class="bar"><div class="fill" style="width:78%;background:#b76a62"></div></div></div>
+  <div class="card metric"><small>Soil Health</small><strong class="warn">68%</strong><div class="bar"><div class="fill" style="width:68%;background:#b69a52"></div></div></div>
+  <div class="card metric"><small>Crop</small><strong>Tomato</strong><span class="sub">Current field</span></div>
+  <div class="card w7"><h2>7-Day Disease Risk</h2><canvas id="riskChart" height="115"></canvas></div>
+  <div class="card w5"><h2>Current Weather</h2><div class="weather">
+   <div><span class="sub">Temp</span><strong>29°C</strong></div><div><span class="sub">Humidity</span><strong>84%</strong></div>
+   <div><span class="sub">Rain</span><strong>72%</strong></div><div><span class="sub">Wind</span><strong>9 km/h</strong></div>
+  </div><div class="alert red" style="margin-top:14px"><b>High fungal risk:</b> humidity and expected rainfall favor disease development.</div></div>
+  <div class="card w6"><h2>Latest Diagnosis</h2><strong style="font-size:22px">Tomato Early Blight</strong><p class="sub">Image model confidence</p><div class="bar"><div class="fill" style="width:91%"></div></div><b>91%</b></div>
+  <div class="card w6"><h2>Soil Snapshot</h2><table><tr><td>Nitrogen</td><td class="warn"><b>Low</b></td><td>210 kg/ha</td></tr><tr><td>pH</td><td>Moderately alkaline</td><td>7.5</td></tr><tr><td>Organic Carbon</td><td class="warn"><b>Low</b></td><td>0.43%</td></tr></table></div>
+ </div>
+</section>
+
+<section id="analysis" class="page">
+ <div class="top"><div><h1>Crop Image Analysis</h1><p>Upload a crop image for disease classification</p></div></div>
+ <div class="grid"><div class="card w7"><h2>Upload Image</h2><div class="upload">Crop / leaf photograph<br><input type="file" id="cropImage" accept="image/*"></div><br>
+ <label>Crop<select id="crop"><option>Tomato</option><option>Potato</option><option>Rice</option><option>Cotton</option><option>Maize</option></select></label><br><br><button class="primary" onclick="analyzeImage()">Analyze Crop</button>
+ <div id="imgResult" class="result"><div class="alert red"><b>Early Blight detected</b> — moderate severity</div><p>Model confidence</p><div class="bar"><div class="fill" style="width:91%"></div></div><b>91%</b><p class="sub">Demo prediction only. Replace with your trained CNN endpoint.</p></div></div>
+ <div class="card w5"><h2>How this module works</h2><div class="rec"><div class="dot">1</div><div>Image is resized and normalized.</div></div><div class="rec"><div class="dot">2</div><div>EfficientNet/MobileNet extracts visual features.</div></div><div class="rec"><div class="dot">3</div><div>Model returns disease class and confidence.</div></div><div class="rec"><div class="dot">4</div><div>Prediction is sent to the fusion engine.</div></div></div></div>
+</section>
+
+<section id="soil" class="page">
+ <div class="top"><div><h1>Soil Health Card</h1><p>Enter values from the government Soil Health Card</p></div></div>
+ <div class="card"><div class="fields" id="soilFields"></div><br><button class="primary" onclick="analyzeSoil()">Analyze Soil</button>
+ <div id="soilResult" class="result"><div class="alert">
+    <b>Soil score: <span id="soilScore">--</span>/100</b>
+    — <span id="soilMessage">Waiting for analysis.</span>
+</div><table><tr><th>Parameter</th><th>Status</th></tr><tr><td>Nitrogen</td><td class="warn">Low</td></tr><tr><td>Phosphorus</td><td class="good">Normal</td></tr><tr><td>Potassium</td><td class="good">Normal</td></tr><tr><td>pH</td><td class="warn">Moderately alkaline</td></tr><tr><td>Organic Carbon</td><td class="warn">Low</td></tr></table></div></div>
+</section>
+
+<section id="weather" class="page">
+ <div class="top"><div><h1>Weather Intelligence</h1><p>Weather API inputs used for crop-risk estimation</p></div></div>
+ <div class="card"><div class="weather"><div><span class="sub">Temperature</span><strong>29°C</strong></div><div><span class="sub">Humidity</span><strong>84%</strong></div><div><span class="sub">Rain probability</span><strong>72%</strong></div><div><span class="sub">Wind</span><strong>9 km/h</strong></div></div><br><div class="alert blue"><b>Model interpretation:</b> warm, humid conditions plus expected rainfall increase fungal-disease pressure.</div></div>
+</section>
+
+<section id="advisory" class="page">
+ <div class="top"><div><h1>Smart Advisory</h1><p>Combined image + soil + weather decision support</p></div><div class="badge">Risk: HIGH</div></div>
+ <div class="grid"><div class="card w5"><h2>Fusion Summary</h2><table><tr><td>Image evidence</td><td><b>91%</b></td></tr><tr><td>Weather risk</td><td><b>79%</b></td></tr><tr><td>Soil health</td><td><b>68%</b></td></tr><tr><td>Combined risk</td><td class="danger"><b>82%</b></td></tr></table></div>
+ <div class="card w7"><h2>Recommended Actions</h2><div class="rec"><div class="dot">1</div><div><b>Inspect nearby plants.</b><br><span class="sub">Check for similar lesions and record spread.</span></div></div><div class="rec"><div class="dot">2</div><div><b>Reduce unnecessary leaf wetness.</b><br><span class="sub">High humidity and rainfall raise fungal risk.</span></div></div><div class="rec"><div class="dot">3</div><div><b>Address nutrient status.</b><br><span class="sub">Nitrogen and organic carbon are below the prototype target range.</span></div></div><div class="rec"><div class="dot">4</div><div><b>Follow validated local crop-protection guidance.</b><br><span class="sub">Do not derive pesticide dosage from the ML model.</span></div></div></div></div>
+</section>
+
+<section id="history" class="page">
+ <div class="top"><div><h1>Analysis History</h1><p>Previous crop assessments and risk trends</p></div></div>
+ <div class="card"><table><tr><th>Date</th><th>Crop</th><th>Health</th><th>Disease</th><th>Risk</th></tr><tr><td>18 Oct</td><td>Tomato</td><td>64%</td><td>Early Blight</td><td class="danger">78%</td></tr><tr><td>16 Oct</td><td>Tomato</td><td>71%</td><td>Early Blight</td><td class="warn">63%</td></tr><tr><td>14 Oct</td><td>Tomato</td><td>76%</td><td>Possible symptoms</td><td>47%</td></tr><tr><td>12 Oct</td><td>Tomato</td><td>82%</td><td>Healthy</td><td class="good">30%</td></tr></table></div>
+</section>
+</main>
+</div>
+<script>
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+ document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+ document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+ b.classList.add('active'); document.getElementById(b.dataset.page).classList.add('active');
+});
+const params=['Nitrogen (N)','Phosphorus (P)','Potassium (K)','Sulphur (S)','Zinc (Zn)','Iron (Fe)','Copper (Cu)','Manganese (Mn)','Boron (B)','pH','EC','Organic Carbon (%)'];
+const soilIds = [
+    'N',
+    'P',
+    'K',
+    'S',
+    'Zn',
+    'Fe',
+    'Cu',
+    'Mn',
+    'B',
+    'pH',
+    'EC',
+    'OC'
+];
+const vals=['210','20','310','14','0.62','5.1','0.8','3.4','0.45','7.5','0.42','0.43'];
+document.getElementById('soilFields').innerHTML =
+    params.map((p, i) =>
+        `<label>
+            ${p}
+            <input
+                id="${soilIds[i]}"
+                type="number"
+                step="any"
+                value="${vals[i]}"
+            >
+        </label>`
+    ).join('');
+function analyzeImage(){document.getElementById('imgResult').classList.add('show')}
+async function analyzeSoil() {
+    const soilData = {
+        N: parseFloat(document.getElementById("N").value),
+        P: parseFloat(document.getElementById("P").value),
+        K: parseFloat(document.getElementById("K").value),
+        S: parseFloat(document.getElementById("S").value),
+
+        Zn: parseFloat(document.getElementById("Zn").value),
+        Fe: parseFloat(document.getElementById("Fe").value),
+        Cu: parseFloat(document.getElementById("Cu").value),
+        Mn: parseFloat(document.getElementById("Mn").value),
+        B: parseFloat(document.getElementById("B").value),
+
+        pH: parseFloat(document.getElementById("pH").value),
+        EC: parseFloat(document.getElementById("EC").value),
+        OC: parseFloat(document.getElementById("OC").value)
+    };
+
+
+    try {
+
+        const response = await fetch(
+            "http://127.0.0.1:8000/api/soil/analyze",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                body: JSON.stringify(soilData)
+            }
+        );
+
+
+        const result = await response.json();
+
+        console.log(result);
+        document.getElementById("soilScore").textContent =
+    result.soil_score;
+
+document.getElementById("soilMessage").textContent =
+    result.problems.length > 0
+        ? result.problems.join(", ")
+        : "Soil parameters look normal.";
+
+
+        document
+            .getElementById("soilResult")
+            .classList.add("show");
+
+
+        alert(
+            "Soil Score: " +
+            result.soil_score +
+            "\n\nProblems:\n" +
+            result.problems.join("\n")
+        );
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+
+        alert(
+            "Could not connect to backend."
+        );
+
+    }
+}
+new Chart(document.getElementById('riskChart'),{type:'line',data:{labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],datasets:[{label:'Disease risk %',data:[31,38,46,55,64,72,78],tension:.35,fill:false}]},options:{plugins:{legend:{display:false}},scales:{y:{min:0,max:100,grid:{color:'#eef1ec'}},x:{grid:{display:false}}},responsive:true}});
+</script>
+</body>
+</html>

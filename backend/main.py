@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File 
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -90,3 +90,14 @@ def weather(
     )
 
     return result
+@app.post("/api/crop/analyze")
+async def crop_analysis(image: UploadFile = File(...)):
+
+    return {
+        "filename": image.filename,
+        "crop": "Tomato",
+        "disease": "Early Blight",
+        "confidence": 0.91,
+        "status": "test_only",
+        "message": "Image received successfully. ML model not connected yet."
+    }

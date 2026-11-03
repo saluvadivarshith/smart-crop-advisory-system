@@ -94,9 +94,38 @@ table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;p
 
 <section id="weather" class="page">
  <div class="top"><div><h1>Weather Intelligence</h1><p>Weather API inputs used for crop-risk estimation</p></div></div>
- <div class="card"><div class="weather"><div><span class="sub">Temperature</span><strong>29°C</strong></div><div><span class="sub">Humidity</span><strong>84%</strong></div><div><span class="sub">Rain probability</span><strong>72%</strong></div><div><span class="sub">Wind</span><strong>9 km/h</strong></div></div><br><div class="alert blue"><b>Model interpretation:</b> warm, humid conditions plus expected rainfall increase fungal-disease pressure.</div></div>
-</section>
+<div class="card">
+    <div class="weather">
 
+        <div>
+            <span class="sub">Temperature</span>
+            <strong id="weatherTemp">--°C</strong>
+        </div>
+
+        <div>
+            <span class="sub">Humidity</span>
+            <strong id="weatherHumidity">--%</strong>
+        </div>
+
+        <div>
+            <span class="sub">Rain probability</span>
+            <strong id="weatherRain">--%</strong>
+        </div>
+
+        <div>
+            <span class="sub">Wind</span>
+            <strong id="weatherWind">-- km/h</strong>
+        </div>
+
+    </div>
+
+    <br>
+
+    <button class="primary" onclick="loadWeather()">
+        Load Current Weather
+    </button>
+</div>
+</section>
 <section id="advisory" class="page">
  <div class="top"><div><h1>Smart Advisory</h1><p>Combined image + soil + weather decision support</p></div><div class="badge">Risk: HIGH</div></div>
  <div class="grid"><div class="card w5"><h2>Fusion Summary</h2><table><tr><td>Image evidence</td><td><b>91%</b></td></tr><tr><td>Weather risk</td><td><b>79%</b></td></tr><tr><td>Soil health</td><td><b>68%</b></td></tr><tr><td>Combined risk</td><td class="danger"><b>82%</b></td></tr></table></div>
@@ -143,8 +172,53 @@ document.getElementById('soilFields').innerHTML =
             >
         </label>`
     ).join('');
-function analyzeImage(){document.getElementById('imgResult').classList.add('show')}
-async function analyzeSoil() {
+async function analyzeImage() {
+
+    const imageInput = document.getElementById("cropImage");
+
+    if (!imageInput.files.length) {
+        alert("Please select a crop image first.");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("image", imageInput.files[0]);
+
+    try {
+
+        const response = await fetch(
+            "http://127.0.0.1:8000/api/crop/analyze",
+            {
+                method: "POST",
+                body: formData
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error("Image analysis failed");
+        }
+
+        const result = await response.json();
+
+        console.log(result);
+
+        document
+            .getElementById("imgResult")
+            .classList.add("show");
+
+        alert(
+            "Image uploaded successfully!\n\n" +
+            "File: " + result.filename +
+            "\n\nML model will be connected later."
+        );
+
+    } catch (error) {
+
+        console.error(error);
+        alert("Could not connect to crop analysis backend.");
+
+    }
+}async function analyzeSoil() {
     const soilData = {
         N: parseFloat(document.getElementById("N").value),
         P: parseFloat(document.getElementById("P").value),
@@ -162,6 +236,7 @@ async function analyzeSoil() {
         OC: parseFloat(document.getElementById("OC").value)
     };
 
+    
 
     try {
 
@@ -213,6 +288,39 @@ document.getElementById("soilMessage").textContent =
             "Could not connect to backend."
         );
 
+    }
+}
+async function loadWeather() {
+
+    const latitude = 17.385;
+    const longitude = 78.4867;
+
+    try {
+        const response = await fetch(
+            `http://127.0.0.1:8000/api/weather?latitude=${latitude}&longitude=${longitude}`
+        );
+
+        if (!response.ok) {
+            throw new Error("Weather API request failed");
+        }
+
+        const weather = await response.json();
+
+        document.getElementById("weatherTemp").textContent =
+            weather.temperature + "°C";
+
+        document.getElementById("weatherHumidity").textContent =
+            weather.humidity + "%";
+
+        document.getElementById("weatherRain").textContent =
+            weather.rain_probability + "%";
+
+        document.getElementById("weatherWind").textContent =
+            weather.wind_speed + " km/h";
+
+    } catch (error) {
+        console.error(error);
+        alert("Unable to load weather data.");
     }
 }
 new Chart(document.getElementById('riskChart'),{type:'line',data:{labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],datasets:[{label:'Disease risk %',data:[31,38,46,55,64,72,78],tension:.35,fill:false}]},options:{plugins:{legend:{display:false}},scales:{y:{min:0,max:100,grid:{color:'#eef1ec'}},x:{grid:{display:false}}},responsive:true}});

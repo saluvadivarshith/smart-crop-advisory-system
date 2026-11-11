@@ -1,329 +1,603 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CropSense — Smart Crop Advisory Prototype</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<style>
-:root{
-  --bg:#f6f7f2;--card:#fff;--ink:#213127;--muted:#718078;--line:#e3e8df;
-  --green:#557a61;--green2:#dfeadd;--peach:#f3dfcf;--yellow:#f3ebc9;--red:#f2d7d4;--blue:#dce9ec;
-}
-*{box-sizing:border-box} body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
-button,input,select{font:inherit}
-.shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
-aside{background:#edf1e9;border-right:1px solid var(--line);padding:24px 18px;position:sticky;top:0;height:100vh}
-.brand{font-weight:800;font-size:20px;margin:0 8px 28px}.brand span{color:var(--green)}
-nav button{width:100%;border:0;background:transparent;text-align:left;padding:11px 12px;border-radius:10px;color:#56655d;margin:3px 0;cursor:pointer}
-nav button.active,nav button:hover{background:#dfe7db;color:#24402d;font-weight:700}
-main{padding:28px;max-width:1500px;width:100%}
-.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.top h1{margin:0;font-size:27px}.top p{margin:5px 0 0;color:var(--muted)}
-.badge{background:var(--green2);padding:8px 12px;border-radius:999px;font-size:13px;font-weight:700}
-.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 5px 18px rgba(35,50,40,.035)}
-.metric{grid-column:span 3}.metric small{color:var(--muted)}.metric strong{display:block;font-size:28px;margin-top:9px}
-.good{color:#4d765a}.warn{color:#9b7427}.danger{color:#a8544d}
-.w7{grid-column:span 7}.w5{grid-column:span 5}.w6{grid-column:span 6}.w12{grid-column:span 12}
-h2{font-size:17px;margin:0 0 15px}.sub{color:var(--muted);font-size:13px}
-.upload{border:1.5px dashed #bac8b7;border-radius:14px;padding:28px;text-align:center;background:#fafcf8}
-.upload input{margin-top:12px;max-width:100%}
-.fields{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-label{font-size:12px;color:var(--muted)}input,select{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px;margin-top:5px;background:#fff;color:var(--ink)}
-.primary{border:0;background:var(--green);color:white;padding:11px 16px;border-radius:10px;font-weight:700;cursor:pointer}
-.primary:hover{filter:brightness(.96)}
-.result{display:none;margin-top:16px}.result.show{display:block}
-.bar{height:8px;background:#edf0eb;border-radius:20px;overflow:hidden;margin:8px 0 3px}.fill{height:100%;background:var(--green);border-radius:20px}
-.alert{border-radius:12px;padding:13px 14px;background:var(--yellow);margin:9px 0;font-size:14px}
-.alert.red{background:var(--red)}.alert.blue{background:var(--blue)}
-.rec{display:flex;gap:10px;margin:11px 0}.dot{width:25px;height:25px;flex:0 0 25px;border-radius:50%;background:var(--green2);display:grid;place-items:center;font-size:12px;font-weight:800}
-table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
-.weather{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.weather div{background:#f7f9f5;border-radius:12px;padding:13px}.weather strong{display:block;font-size:20px;margin-top:4px}
-.page{display:none}.page.active{display:block}
-@media(max-width:900px){.shell{grid-template-columns:1fr}aside{position:relative;height:auto}.metric,.w7,.w5,.w6{grid-column:span 12}.fields{grid-template-columns:repeat(2,1fr)}.weather{grid-template-columns:repeat(2,1fr)}}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CropSense — Smart Crop Advisory System for Small & Marginal Farmers</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 <div class="shell">
-<aside>
-  <div class="brand">Crop<span>Sense</span></div>
-  <nav>
-    <button class="active" data-page="dashboard">Dashboard</button>
-    <button data-page="analysis">Crop Analysis</button>
-    <button data-page="soil">Soil Health</button>
-    <button data-page="weather">Weather</button>
-    <button data-page="advisory">Advisory</button>
-    <button data-page="history">History</button>
-  </nav>
-</aside>
+  <aside>
+    <div>
+      <div class="brand">🌿 Crop<span>Sense</span></div>
+      <div class="brand-sub" data-i18n="brand_sub">Smart Crop Advisory for Small & Marginal Farmers</div>
 
-<main>
-<section id="dashboard" class="page active">
- <div class="top"><div><h1>Farm Overview</h1><p>Multimodal crop health and risk monitoring</p></div><div class="badge">● Prototype data</div></div>
- <div class="grid">
-  <div class="card metric"><small>Crop Health</small><strong class="good">72%</strong><div class="bar"><div class="fill" style="width:72%"></div></div></div>
-  <div class="card metric"><small>Disease Risk</small><strong class="danger">High · 78%</strong><div class="bar"><div class="fill" style="width:78%;background:#b76a62"></div></div></div>
-  <div class="card metric"><small>Soil Health</small><strong class="warn">68%</strong><div class="bar"><div class="fill" style="width:68%;background:#b69a52"></div></div></div>
-  <div class="card metric"><small>Crop</small><strong>Tomato</strong><span class="sub">Current field</span></div>
-  <div class="card w7"><h2>7-Day Disease Risk</h2><canvas id="riskChart" height="115"></canvas></div>
-  <div class="card w5"><h2>Current Weather</h2><div class="weather">
-   <div><span class="sub">Temp</span><strong>29°C</strong></div><div><span class="sub">Humidity</span><strong>84%</strong></div>
-   <div><span class="sub">Rain</span><strong>72%</strong></div><div><span class="sub">Wind</span><strong>9 km/h</strong></div>
-  </div><div class="alert red" style="margin-top:14px"><b>High fungal risk:</b> humidity and expected rainfall favor disease development.</div></div>
-  <div class="card w6"><h2>Latest Diagnosis</h2><strong style="font-size:22px">Tomato Early Blight</strong><p class="sub">Image model confidence</p><div class="bar"><div class="fill" style="width:91%"></div></div><b>91%</b></div>
-  <div class="card w6"><h2>Soil Snapshot</h2><table><tr><td>Nitrogen</td><td class="warn"><b>Low</b></td><td>210 kg/ha</td></tr><tr><td>pH</td><td>Moderately alkaline</td><td>7.5</td></tr><tr><td>Organic Carbon</td><td class="warn"><b>Low</b></td><td>0.43%</td></tr></table></div>
- </div>
-</section>
+      <div class="active-farm-box">
+        <small data-i18n="active_farm_label">Selected Farm</small>
+        <div id="activeFarmSummary"><span class="sub">No farm selected yet.</span></div>
+      </div>
 
-<section id="analysis" class="page">
- <div class="top"><div><h1>Crop Image Analysis</h1><p>Upload a crop image for disease classification</p></div></div>
- <div class="grid"><div class="card w7"><h2>Upload Image</h2><div class="upload">Crop / leaf photograph<br><input type="file" id="cropImage" accept="image/*"></div><br>
- <label>Crop<select id="crop"><option>Tomato</option><option>Potato</option><option>Rice</option><option>Cotton</option><option>Maize</option></select></label><br><br><button class="primary" onclick="analyzeImage()">Analyze Crop</button>
- <div id="imgResult" class="result"><div class="alert red"><b>Early Blight detected</b> — moderate severity</div><p>Model confidence</p><div class="bar"><div class="fill" style="width:91%"></div></div><b>91%</b><p class="sub">Demo prediction only. Replace with your trained CNN endpoint.</p></div></div>
- <div class="card w5"><h2>How this module works</h2><div class="rec"><div class="dot">1</div><div>Image is resized and normalized.</div></div><div class="rec"><div class="dot">2</div><div>EfficientNet/MobileNet extracts visual features.</div></div><div class="rec"><div class="dot">3</div><div>Model returns disease class and confidence.</div></div><div class="rec"><div class="dot">4</div><div>Prediction is sent to the fusion engine.</div></div></div></div>
-</section>
-
-<section id="soil" class="page">
- <div class="top"><div><h1>Soil Health Card</h1><p>Enter values from the government Soil Health Card</p></div></div>
- <div class="card"><div class="fields" id="soilFields"></div><br><button class="primary" onclick="analyzeSoil()">Analyze Soil</button>
- <div id="soilResult" class="result"><div class="alert">
-    <b>Soil score: <span id="soilScore">--</span>/100</b>
-    — <span id="soilMessage">Waiting for analysis.</span>
-</div><table><tr><th>Parameter</th><th>Status</th></tr><tr><td>Nitrogen</td><td class="warn">Low</td></tr><tr><td>Phosphorus</td><td class="good">Normal</td></tr><tr><td>Potassium</td><td class="good">Normal</td></tr><tr><td>pH</td><td class="warn">Moderately alkaline</td></tr><tr><td>Organic Carbon</td><td class="warn">Low</td></tr></table></div></div>
-</section>
-
-<section id="weather" class="page">
- <div class="top"><div><h1>Weather Intelligence</h1><p>Weather API inputs used for crop-risk estimation</p></div></div>
-<div class="card">
-    <div class="weather">
-
-        <div>
-            <span class="sub">Temperature</span>
-            <strong id="weatherTemp">--°C</strong>
-        </div>
-
-        <div>
-            <span class="sub">Humidity</span>
-            <strong id="weatherHumidity">--%</strong>
-        </div>
-
-        <div>
-            <span class="sub">Rain probability</span>
-            <strong id="weatherRain">--%</strong>
-        </div>
-
-        <div>
-            <span class="sub">Wind</span>
-            <strong id="weatherWind">-- km/h</strong>
-        </div>
-
+      <nav>
+        <button class="active" data-page="dashboard">📊 <span data-i18n="nav_dashboard">Dashboard</span></button>
+        <button data-page="farm">📍 <span data-i18n="nav_farm">Farm Profile & Location</span></button>
+        <button data-page="analysis">🍃 <span data-i18n="nav_crop">Crop Leaf Analysis</span></button>
+        <button data-page="soil">🧪 <span data-i18n="nav_soil">Soil Health Card</span></button>
+        <button data-page="weather">🌦️ <span data-i18n="nav_weather">Farm Weather</span></button>
+        <button data-page="advisory">📋 <span data-i18n="nav_advisory">Smart Advisory</span></button>
+        <button data-page="history">🗂️ <span data-i18n="nav_history">Assessment History</span></button>
+      </nav>
     </div>
 
-    <br>
+    <div class="sidebar-footer">
+      <div class="lang-switcher" role="group" aria-label="Language selection">
+        <button class="lang-btn active" data-lang="en">English</button>
+        <button class="lang-btn" data-lang="te">తెలుగు</button>
+        <button class="lang-btn" data-lang="hi">हिन्दी</button>
+      </div>
+      <div data-i18n="helpline_label">Kisan Call Centre (Toll-Free): 1800-180-1551</div>
+    </div>
+  </aside>
 
-    <button class="primary" onclick="loadWeather()">
-        Load Current Weather
-    </button>
+  <main>
+    <!-- Guided 4-Step Farmer Journey Strip -->
+    <div class="journey-strip" role="navigation" aria-label="Guided workflow steps">
+      <div id="stepCardFarm" class="journey-step" onclick="switchPage('farm')">
+        <div class="step-num" id="stepNumFarm">1</div>
+        <div>
+          <small>Step 1 · Location & Land</small>
+          <strong id="stepLabelFarm">Set Farm & Map Boundary</strong>
+        </div>
+      </div>
+      <div id="stepCardCrop" class="journey-step" onclick="switchPage('analysis')">
+        <div class="step-num" id="stepNumCrop">2</div>
+        <div>
+          <small>Step 2 · Leaf AI + Heatmap</small>
+          <strong id="stepLabelCrop">Scan Crop Leaf Photo</strong>
+        </div>
+      </div>
+      <div id="stepCardSoil" class="journey-step" onclick="switchPage('soil')">
+        <div class="step-num" id="stepNumSoil">3</div>
+        <div>
+          <small>Step 3 · 12-Param Soil Card</small>
+          <strong id="stepLabelSoil">Check Soil Nutrients</strong>
+        </div>
+      </div>
+      <div id="stepCardAdv" class="journey-step" onclick="switchPage('advisory')">
+        <div class="step-num" id="stepNumAdv">4</div>
+        <div>
+          <small>Step 4 · Action Plan</small>
+          <strong id="stepLabelAdv">Advisory & Crop Calendar</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1. DASHBOARD -->
+    <section id="dashboard" class="page active">
+      <div class="top">
+        <div>
+          <h1 data-i18n="dash_title">Farm Overview</h1>
+          <p data-i18n="dash_subtitle">Live crop health, soil status, farm weather, and integrated risk</p>
+        </div>
+        <div class="top-actions">
+          <div id="dashFarmBadge" class="badge neutral">No farm selected</div>
+          <button class="primary" onclick="runFullAdvisory(true)" data-i18n="btn_run_full_advisory">Generate & Save Full Advisory</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card metric">
+          <small data-i18n="dash_metric_crop">Selected Crop & Stage</small>
+          <strong id="dashCropMetric">Tomato</strong>
+          <span id="dashCropSub" class="sub">Stage: vegetative</span>
+        </div>
+
+        <div class="card metric">
+          <small data-i18n="dash_metric_disease">Latest Leaf Check</small>
+          <strong id="dashDiseaseMetric">Not checked</strong>
+          <span id="dashDiseaseSub" class="sub">Upload or click a sample leaf</span>
+        </div>
+
+        <div class="card metric">
+          <small data-i18n="dash_metric_soil">Soil Health Score</small>
+          <strong id="dashSoilMetric">No card</strong>
+          <div class="bar"><div id="dashSoilBar" class="fill" style="width:0%"></div></div>
+        </div>
+
+        <div class="card metric">
+          <small data-i18n="dash_metric_risk">Overall Crop Risk</small>
+          <strong id="dashRiskMetric">Not run</strong>
+          <div class="bar"><div id="dashRiskBar" class="fill" style="width:0%;background:#b91c1c"></div></div>
+        </div>
+
+        <div class="card w7">
+          <h2 data-i18n="dash_advisory_title">Latest Farmer Advisory & Next Steps</h2>
+          <div id="dashAdvisoryBox"></div>
+        </div>
+
+        <div class="card w5">
+          <h2 data-i18n="dash_weather_title">Current Farm Weather</h2>
+          <div id="dashWeatherBox"></div>
+        </div>
+
+        <div class="card w12">
+          <h2 data-i18n="dash_trend_title">Historical Risk & Soil Health Trend</h2>
+          <div id="chartEmptyNote" class="empty-state">
+            No saved assessments yet. Complete a crop, soil, or weather check and click <b>"Generate & Save Full Advisory"</b> to track your farm's trend over time.
+          </div>
+          <canvas id="riskChart" height="85" style="display:none"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. FARM PROFILE & LOCATION -->
+    <section id="farm" class="page">
+      <div class="top">
+        <div>
+          <h1 data-i18n="farm_title">Farm Profile & Location</h1>
+          <p data-i18n="farm_subtitle">Select your village/farm location, trace your field on the satellite map, and set your crop & sowing date</p>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card w6">
+          <h2 data-i18n="farm_locate_title">1. Find Farm Location (GPS, Search, or Voice)</h2>
+          <p class="sub">Use your phone's GPS while standing at the farm, or search / speak your village name.</p>
+          <div class="btn-row">
+            <button class="primary" onclick="useCurrentGpsLocation()">📍 <span data-i18n="btn_use_gps">Use My Current GPS Location</span></button>
+            <button class="secondary" onclick="voiceSearchVillage()">🎙️ Speak Village Name</button>
+          </div>
+          <p id="geoStatus" class="sub" style="margin-top:8px"></p>
+
+          <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+
+          <label for="locationSearchInput">Search Village, Mandal, Town, or District (India)</label>
+          <div class="btn-row" style="margin-top:6px">
+            <input id="locationSearchInput" type="text" placeholder="e.g. Warangal, Guntur, Nashik, Ludhiana..." style="flex:1;margin:0">
+            <button class="secondary" onclick="searchVillageLocation()" data-i18n="btn_search_loc">Search Village / Town</button>
+          </div>
+          <div id="locationSearchResults" class="location-results"></div>
+        </div>
+
+        <div class="card w6">
+          <h2 data-i18n="farm_details_title">2. Farm, Crop & Sowing Details</h2>
+          <div class="fields-2">
+            <label>
+              <span data-i18n="lbl_farm_name">Farm Name / Plot Identifier</span>
+              <input id="farmName" type="text" placeholder="e.g. North Plot / Raju Field">
+            </label>
+            <label>
+              <span data-i18n="lbl_village">Village / Town</span>
+              <input id="farmVillage" type="text" placeholder="Village or Town">
+            </label>
+            <label>
+              <span data-i18n="lbl_district">District</span>
+              <input id="farmDistrict" type="text" placeholder="District">
+            </label>
+            <label>
+              <span data-i18n="lbl_state">State</span>
+              <input id="farmState" type="text" placeholder="State">
+            </label>
+            <label>
+              <span data-i18n="lbl_lat">Latitude</span>
+              <input id="farmLat" type="number" step="any" placeholder="e.g. 17.9689">
+            </label>
+            <label>
+              <span data-i18n="lbl_lon">Longitude</span>
+              <input id="farmLon" type="number" step="any" placeholder="e.g. 79.5941">
+            </label>
+            <label>
+              <span data-i18n="lbl_crop">Primary Crop</span>
+              <select id="farmCrop">
+                <option value="Tomato">Tomato</option>
+                <option value="Potato">Potato</option>
+                <option value="Pepper">Bell Pepper / Capsicum</option>
+                <option value="Chilli">Chilli</option>
+                <option value="Maize">Maize (Corn)</option>
+                <option value="Rice">Rice (Paddy)</option>
+                <option value="Cotton">Cotton</option>
+                <option value="Wheat">Wheat</option>
+                <option value="Groundnut">Groundnut</option>
+                <option value="Soybean">Soybean</option>
+                <option value="Apple">Apple</option>
+                <option value="Grape">Grape</option>
+                <option value="Orange">Orange / Citrus</option>
+                <option value="Peach">Peach</option>
+                <option value="Strawberry">Strawberry</option>
+              </select>
+            </label>
+            <label>
+              <span>Sowing / Planting Date (for Crop Calendar)</span>
+              <input id="farmSowingDate" type="date">
+            </label>
+            <label style="grid-column:span 2">
+              <span data-i18n="lbl_area">Farm Area (Acres) — Auto-filled from Map or Manual Dimensions below</span>
+              <input id="farmArea" type="number" step="0.01" min="0" placeholder="Auto-calculated from map polygon or Length × Width">
+            </label>
+          </div>
+          <div class="btn-row">
+            <button class="primary" onclick="saveFarmProfile()" data-i18n="btn_save_farm">Save Farm Profile</button>
+          </div>
+        </div>
+
+        <!-- 3. INTERACTIVE LAND MAP & MANUAL DIMENSION CALCULATOR -->
+        <div class="card w7">
+          <h2>3. Select Land Boundary on Map (Satellite / Street)</h2>
+          <p class="sub" style="margin-top:-6px;margin-bottom:10px">
+            In <b>"Draw Land Boundary"</b> mode, tap 3 or more corners of your field on the satellite map to measure your plot automatically.
+          </p>
+          <div class="map-toolbar">
+            <div class="map-mode-group" role="group" aria-label="Map interaction mode">
+              <button id="modePinBtn" type="button" class="map-mode-btn" onclick="setMapMode('pin')">📍 Pin Location</button>
+              <button id="modeDrawBtn" type="button" class="map-mode-btn active" onclick="setMapMode('draw')">📐 Draw Land Boundary</button>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button type="button" class="secondary" onclick="toggleMapLayer()" id="btnToggleTile">🗺️ Switch to Street Map</button>
+              <button type="button" class="secondary" onclick="undoLastBoundaryPoint()">↩️ Undo Corner</button>
+              <button type="button" class="secondary" onclick="clearBoundaryPolygon()">🗑️ Clear Boundary</button>
+            </div>
+          </div>
+
+          <div id="farmMap"></div>
+
+          <div class="dimension-summary-bar">
+            <div class="dim-chip">
+              <small>Area (Acres)</small>
+              <strong id="dimAcres">0.00 ac</strong>
+            </div>
+            <div class="dim-chip">
+              <small>Guntas (1 ac = 40)</small>
+              <strong id="dimGuntas">0.0 guntas</strong>
+            </div>
+            <div class="dim-chip">
+              <small>Hectares</small>
+              <strong id="dimHectares">0.00 ha</strong>
+            </div>
+            <div class="dim-chip">
+              <small>Dimensions / Area (m²)</small>
+              <strong id="dimSqMeters">0 m²</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="card w5">
+          <h2>4. Or Enter Land Dimensions Manually</h2>
+          <p class="sub" style="margin-top:-6px;margin-bottom:12px">
+            Know your field's length & width (or Guntas / Cents)? Enter them below to calculate area and preview the plot box on the map.
+          </p>
+
+          <div class="fields-3">
+            <label>
+              Plot Length
+              <input id="manualLength" type="number" step="any" min="0" placeholder="e.g. 100" oninput="calculateManualDimensions()">
+            </label>
+            <label>
+              Plot Width
+              <input id="manualWidth" type="number" step="any" min="0" placeholder="e.g. 60" oninput="calculateManualDimensions()">
+            </label>
+            <label>
+              Unit
+              <select id="manualDimUnit" onchange="calculateManualDimensions()">
+                <option value="m" selected>Meters (m)</option>
+                <option value="ft">Feet (ft)</option>
+                <option value="yd">Yards / Gaj</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="btn-row" style="margin-top:10px">
+            <button type="button" class="secondary" onclick="applyManualPlotToMap()">📐 Draw Length × Width Box on Map</button>
+          </div>
+
+          <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+
+          <h3>Quick Local Area Unit Converter</h3>
+          <div class="fields-2">
+            <label>
+              Enter Guntas (1 Acre = 40 Guntas)
+              <input id="inputGuntas" type="number" step="any" min="0" placeholder="e.g. 20" oninput="convertFromGuntas()">
+            </label>
+            <label>
+              Enter Cents (1 Acre = 100 Cents)
+              <input id="inputCents" type="number" step="any" min="0" placeholder="e.g. 50" oninput="convertFromCents()">
+            </label>
+          </div>
+          <p id="manualCalcNote" class="sub" style="margin-top:10px">
+            Tip: Drawing on the map or entering Length × Width automatically updates "Farm Area (Acres)" above.
+          </p>
+        </div>
+
+        <div class="card w12">
+          <h2 data-i18n="saved_farms_title">Saved Farms</h2>
+          <div id="savedFarmsList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. CROP LEAF IMAGE ANALYSIS -->
+    <section id="analysis" class="page">
+      <div class="top">
+        <div>
+          <h1 data-i18n="crop_title">Crop Leaf Image Analysis + Grad-CAM Explainability</h1>
+          <p data-i18n="crop_subtitle">Upload a leaf photo or click a sample leaf below for real MobileNetV3 screening and lesion heatmap visualization</p>
+        </div>
+      </div>
+
+      <div id="modelStatusBanner" class="alert blue">Checking ML model readiness...</div>
+
+      <div class="grid">
+        <div class="card w7">
+          <h2 data-i18n="crop_upload_title">Upload Leaf Photograph (JPG / PNG)</h2>
+          <div class="fields-2" style="margin-bottom:14px">
+            <label>
+              <span data-i18n="lbl_crop">Primary Crop</span>
+              <select id="cropSelect">
+                <option value="Tomato">Tomato</option>
+                <option value="Potato">Potato</option>
+                <option value="Pepper">Bell Pepper / Capsicum</option>
+                <option value="Chilli">Chilli</option>
+                <option value="Maize">Maize (Corn)</option>
+                <option value="Rice">Rice (Paddy)</option>
+                <option value="Cotton">Cotton</option>
+                <option value="Wheat">Wheat</option>
+                <option value="Groundnut">Groundnut</option>
+                <option value="Soybean">Soybean</option>
+                <option value="Apple">Apple</option>
+                <option value="Grape">Grape</option>
+                <option value="Orange">Orange / Citrus</option>
+                <option value="Peach">Peach</option>
+                <option value="Strawberry">Strawberry</option>
+              </select>
+            </label>
+            <label>
+              <span data-i18n="lbl_stage">Current Growth Stage</span>
+              <select id="stageSelect">
+                <option value="seedling">Seedling / Nursery</option>
+                <option value="vegetative" selected>Vegetative Growth</option>
+                <option value="flowering">Flowering</option>
+                <option value="fruiting">Fruiting / Grain Filling</option>
+                <option value="maturity">Maturity / Pre-Harvest</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="upload">
+            <strong>Select or take a close-up photo of a single crop leaf</strong>
+            <div class="sub">Accepted formats: JPG, JPEG, PNG (max 10 MB)</div>
+            <input type="file" id="cropImage" accept="image/jpeg,image/png">
+            <div id="imagePreviewWrap" class="preview-wrap">
+              <img id="imagePreview" alt="Selected crop leaf preview">
+              <div id="imagePreviewMeta" class="sub" style="margin-top:6px"></div>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button id="btnAnalyzeCrop" class="primary" onclick="analyzeImage()" data-i18n="btn_analyze_crop">Analyze Leaf Photo</button>
+            <button class="secondary" onclick="runFullAdvisory(true)" data-i18n="btn_run_full_advisory">Generate & Save Full Advisory</button>
+          </div>
+
+          <div id="imgResult" style="margin-top:16px"></div>
+        </div>
+
+        <div class="card w5">
+          <h2>⚡ 1-Click PlantVillage Sample Leaf Gallery</h2>
+          <p class="sub" style="margin-top:-6px">
+            Click any real leaf from your dataset below to run live MobileNetV3 inference + Grad-CAM lesion heatmap instantly:
+          </p>
+          <div id="sampleLeafGallery" class="sample-gallery">
+            <div class="sub">Loading sample leaves from dataset...</div>
+          </div>
+
+          <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+
+          <h2 data-i18n="crop_how_title">Tips for a Clear Field Photo</h2>
+          <div class="rec"><div class="dot">1</div><div data-i18n="tip_1">Take the photo in natural daylight (avoid dark shadows or strong glare).</div></div>
+          <div class="rec"><div class="dot">2</div><div data-i18n="tip_2">Fill the frame with a single affected leaf showing both spots and green margin.</div></div>
+          <div class="rec"><div class="dot">3</div><div data-i18n="tip_3">Hold the phone steady so the leaf veins and spots are sharp, not blurry.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. SOIL HEALTH CARD -->
+    <section id="soil" class="page">
+      <div class="top">
+        <div>
+          <h1 data-i18n="soil_title">Soil Health Card Analysis</h1>
+          <p data-i18n="soil_subtitle">Enter values from your Government Soil Health Card, pick a regional preset, or paste report text below</p>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card w8">
+          <div class="btn-row" style="margin-top:0;margin-bottom:14px">
+            <button class="secondary" onclick="fillSoilSample(SAMPLE_SOIL_DEFICIENT)" data-i18n="btn_fill_sample_deficient">🔴 Sample: Telangana Red Chalka (Low N, Zn & OC)</button>
+            <button class="secondary" onclick="fillSoilSample(SAMPLE_SOIL_BLACK)">🟤 Sample: Deccan Black Cotton (Alkaline, Low Fe)</button>
+            <button class="secondary" onclick="fillSoilSample(SAMPLE_SOIL_HEALTHY)" data-i18n="btn_fill_sample_healthy">🟢 Sample: Balanced Alluvial Soil</button>
+            <button class="secondary" onclick="clearSoilInputs()" data-i18n="btn_clear_soil">Clear</button>
+          </div>
+
+          <div class="fields" id="soilFields"></div>
+
+          <div class="btn-row">
+            <button class="primary" onclick="analyzeSoil()" data-i18n="btn_analyze_soil">Analyze Soil Health</button>
+            <button class="secondary" onclick="runFullAdvisory(true)" data-i18n="btn_run_full_advisory">Generate & Save Full Advisory</button>
+          </div>
+        </div>
+
+        <div class="card w4">
+          <h2>📄 Smart Soil Report Text Scanner</h2>
+          <p class="sub" style="margin-top:-6px">
+            Have text from a digital Soil Health Card SMS or lab report? Paste it below to auto-extract the 12 parameters:
+          </p>
+          <textarea id="soilPasteText" rows="5" placeholder="Example: pH: 7.6, EC: 0.48, OC: 0.39, Nitrogen: 195, Phosphorus: 14, Potassium: 175, Sulphur: 8.5, Zinc: 0.45, Iron: 4.8, Boron: 0.42"></textarea>
+          <div class="btn-row" style="margin-top:8px">
+            <button class="secondary" onclick="scanSoilTextReport()">🔍 Extract Values into Card</button>
+            <button class="secondary" onclick="loadSampleSoilText()">Paste Example SMS</button>
+          </div>
+        </div>
+
+        <div class="card w12" id="soilResultCard" style="display:none">
+          <div id="soilResult"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. WEATHER INTELLIGENCE -->
+    <section id="weather" class="page">
+      <div class="top">
+        <div>
+          <h1 data-i18n="weather_title">Farm Weather Intelligence</h1>
+          <p id="weatherLocationLabel" data-i18n="weather_subtitle">7-day Open-Meteo forecast, leaf-wetness hours, irrigation balance, and spray windows</p>
+        </div>
+        <div class="top-actions">
+          <button class="secondary" onclick="switchPage('farm')" data-i18n="btn_go_farm">Set Farm Location</button>
+          <button class="primary" onclick="loadWeather(null, null, true)" data-i18n="btn_refresh_weather">Refresh Farm Weather</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card w12">
+          <div class="weather-grid">
+            <div class="weather-box">
+              <span class="sub">Current Temperature</span>
+              <strong id="weatherTemp">--°C</strong>
+              <span id="weatherDesc" class="sub"></span>
+            </div>
+            <div class="weather-box">
+              <span class="sub">Relative Humidity</span>
+              <strong id="weatherHumidity">--%</strong>
+              <span class="sub">High RH (&ge;90%) favors leaf disease</span>
+            </div>
+            <div class="weather-box">
+              <span class="sub">Today's Rain Probability</span>
+              <strong id="weatherRain">--%</strong>
+              <span id="weatherRainMm" class="sub"></span>
+            </div>
+            <div class="weather-box">
+              <span class="sub">Wind Speed (10m)</span>
+              <strong id="weatherWind">-- km/h</strong>
+              <span id="weatherSoilMoisture" class="sub"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card w6">
+          <h2 data-i18n="weather_irrigation_title">3-Day Crop Water Balance (Rain vs. ET₀)</h2>
+          <div id="irrigationBox">
+            <div class="empty-state">Select a farm location and click "Refresh Farm Weather" to see water balance.</div>
+          </div>
+        </div>
+
+        <div class="card w6">
+          <h2 data-i18n="weather_spray_title">Recommended Spray / Field-Work Windows (Next 48h)</h2>
+          <div id="sprayWindowsBox">
+            <div class="empty-state">Select a farm location and click "Refresh Farm Weather" to find safe daytime work windows.</div>
+          </div>
+        </div>
+
+        <div class="card w12">
+          <h2 data-i18n="weather_forecast_title">7-Day Agricultural Forecast</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Conditions</th>
+                  <th>Min – Max Temp</th>
+                  <th>Forecast Rain (Prob.)</th>
+                  <th>Water Loss (ET₀)</th>
+                  <th>Humid Hours (RH &ge; 90%)</th>
+                </tr>
+              </thead>
+              <tbody id="forecastTableBody">
+                <tr><td colspan="6" class="sub" style="text-align:center;padding:16px">Load weather for your farm location to view the 7-day forecast.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p id="weatherMetaNote" class="sub" style="margin-top:10px"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. SMART ADVISORY & CROP CALENDAR -->
+    <section id="advisory" class="page">
+      <div class="top">
+        <div>
+          <h1 data-i18n="adv_title">Integrated Risk, Farmer Advisory & Crop Calendar</h1>
+          <p data-i18n="adv_subtitle">Explainable risk fusion combining leaf image, Soil Health Card, 72-hour weather forecast, and plot-scaled crop calendar</p>
+        </div>
+        <div class="top-actions">
+          <div id="advisoryRiskBadge" class="badge neutral">Risk: Not evaluated</div>
+          <button class="primary" onclick="runFullAdvisory(true)" data-i18n="btn_run_full_advisory">Generate & Save Full Advisory</button>
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-top:0;margin-bottom:16px">
+        <button class="secondary" onclick="speakAdvisory()">🔊 <span data-i18n="btn_speak_advisory">Listen to Advisory (Audio)</span></button>
+        <button class="secondary" onclick="stopSpeakingAdvisory()">⏹️ <span data-i18n="btn_stop_audio">Stop Audio</span></button>
+        <button class="secondary" onclick="copyAdvisoryForWhatsApp()">📲 <span data-i18n="btn_copy_whatsapp">Copy for WhatsApp / SMS</span></button>
+        <button class="secondary" onclick="window.print()">🖨️ <span data-i18n="btn_print_report">Print Advisory Card</span></button>
+      </div>
+
+      <div class="grid">
+        <div class="card w5">
+          <h2>Risk Fusion Breakdown</h2>
+          <div id="advisoryFusionSummary">
+            <div class="empty-state">Click <b>"Generate & Save Full Advisory"</b> to combine your crop image, soil card, and farm weather into an explainable risk assessment.</div>
+          </div>
+        </div>
+
+        <div class="card w7">
+          <h2>Recommended Next Steps for Farmer</h2>
+          <div id="advisoryActionsList">
+            <div class="empty-state">Actionable, prioritized steps will appear here once the advisory is generated.</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="advisoryExtraDetails"></div>
+      <div id="advisoryCalendarSection" style="margin-top:18px"></div>
+    </section>
+
+    <!-- 7. ASSESSMENT HISTORY -->
+    <section id="history" class="page">
+      <div class="top">
+        <div>
+          <h1 data-i18n="hist_title">Assessment History</h1>
+          <p data-i18n="hist_subtitle">Saved crop assessments and historical trends stored in SQLite</p>
+        </div>
+        <div class="top-actions">
+          <button class="secondary" onclick="loadHistory()" data-i18n="btn_refresh_history">Refresh History</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID & Date</th>
+                <th>Crop & Stage</th>
+                <th>Leaf Diagnosis</th>
+                <th>Soil Score</th>
+                <th>Integrated Risk</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="historyTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
-</section>
-<section id="advisory" class="page">
- <div class="top"><div><h1>Smart Advisory</h1><p>Combined image + soil + weather decision support</p></div><div class="badge">Risk: HIGH</div></div>
- <div class="grid"><div class="card w5"><h2>Fusion Summary</h2><table><tr><td>Image evidence</td><td><b>91%</b></td></tr><tr><td>Weather risk</td><td><b>79%</b></td></tr><tr><td>Soil health</td><td><b>68%</b></td></tr><tr><td>Combined risk</td><td class="danger"><b>82%</b></td></tr></table></div>
- <div class="card w7"><h2>Recommended Actions</h2><div class="rec"><div class="dot">1</div><div><b>Inspect nearby plants.</b><br><span class="sub">Check for similar lesions and record spread.</span></div></div><div class="rec"><div class="dot">2</div><div><b>Reduce unnecessary leaf wetness.</b><br><span class="sub">High humidity and rainfall raise fungal risk.</span></div></div><div class="rec"><div class="dot">3</div><div><b>Address nutrient status.</b><br><span class="sub">Nitrogen and organic carbon are below the prototype target range.</span></div></div><div class="rec"><div class="dot">4</div><div><b>Follow validated local crop-protection guidance.</b><br><span class="sub">Do not derive pesticide dosage from the ML model.</span></div></div></div></div>
-</section>
 
-<section id="history" class="page">
- <div class="top"><div><h1>Analysis History</h1><p>Previous crop assessments and risk trends</p></div></div>
- <div class="card"><table><tr><th>Date</th><th>Crop</th><th>Health</th><th>Disease</th><th>Risk</th></tr><tr><td>18 Oct</td><td>Tomato</td><td>64%</td><td>Early Blight</td><td class="danger">78%</td></tr><tr><td>16 Oct</td><td>Tomato</td><td>71%</td><td>Early Blight</td><td class="warn">63%</td></tr><tr><td>14 Oct</td><td>Tomato</td><td>76%</td><td>Possible symptoms</td><td>47%</td></tr><tr><td>12 Oct</td><td>Tomato</td><td>82%</td><td>Healthy</td><td class="good">30%</td></tr></table></div>
-</section>
-</main>
-</div>
-<script>
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
- document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
- document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
- b.classList.add('active'); document.getElementById(b.dataset.page).classList.add('active');
-});
-const params=['Nitrogen (N)','Phosphorus (P)','Potassium (K)','Sulphur (S)','Zinc (Zn)','Iron (Fe)','Copper (Cu)','Manganese (Mn)','Boron (B)','pH','EC','Organic Carbon (%)'];
-const soilIds = [
-    'N',
-    'P',
-    'K',
-    'S',
-    'Zn',
-    'Fe',
-    'Cu',
-    'Mn',
-    'B',
-    'pH',
-    'EC',
-    'OC'
-];
-const vals=['210','20','310','14','0.62','5.1','0.8','3.4','0.45','7.5','0.42','0.43'];
-document.getElementById('soilFields').innerHTML =
-    params.map((p, i) =>
-        `<label>
-            ${p}
-            <input
-                id="${soilIds[i]}"
-                type="number"
-                step="any"
-                value="${vals[i]}"
-            >
-        </label>`
-    ).join('');
-async function analyzeImage() {
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    const imageInput = document.getElementById("cropImage");
-
-    if (!imageInput.files.length) {
-        alert("Please select a crop image first.");
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append("image", imageInput.files[0]);
-
-    try {
-
-        const response = await fetch(
-            "http://127.0.0.1:8000/api/crop/analyze",
-            {
-                method: "POST",
-                body: formData
-            }
-        );
-
-        if (!response.ok) {
-            throw new Error("Image analysis failed");
-        }
-
-        const result = await response.json();
-
-        console.log(result);
-
-        document
-            .getElementById("imgResult")
-            .classList.add("show");
-
-        alert(
-            "Image uploaded successfully!\n\n" +
-            "File: " + result.filename +
-            "\n\nML model will be connected later."
-        );
-
-    } catch (error) {
-
-        console.error(error);
-        alert("Could not connect to crop analysis backend.");
-
-    }
-}async function analyzeSoil() {
-    const soilData = {
-        N: parseFloat(document.getElementById("N").value),
-        P: parseFloat(document.getElementById("P").value),
-        K: parseFloat(document.getElementById("K").value),
-        S: parseFloat(document.getElementById("S").value),
-
-        Zn: parseFloat(document.getElementById("Zn").value),
-        Fe: parseFloat(document.getElementById("Fe").value),
-        Cu: parseFloat(document.getElementById("Cu").value),
-        Mn: parseFloat(document.getElementById("Mn").value),
-        B: parseFloat(document.getElementById("B").value),
-
-        pH: parseFloat(document.getElementById("pH").value),
-        EC: parseFloat(document.getElementById("EC").value),
-        OC: parseFloat(document.getElementById("OC").value)
-    };
-
-    
-
-    try {
-
-        const response = await fetch(
-            "http://127.0.0.1:8000/api/soil/analyze",
-            {
-                method: "POST",
-
-                headers: {
-                    "Content-Type": "application/json"
-                },
-
-                body: JSON.stringify(soilData)
-            }
-        );
-
-
-        const result = await response.json();
-
-        console.log(result);
-        document.getElementById("soilScore").textContent =
-    result.soil_score;
-
-document.getElementById("soilMessage").textContent =
-    result.problems.length > 0
-        ? result.problems.join(", ")
-        : "Soil parameters look normal.";
-
-
-        document
-            .getElementById("soilResult")
-            .classList.add("show");
-
-
-        alert(
-            "Soil Score: " +
-            result.soil_score +
-            "\n\nProblems:\n" +
-            result.problems.join("\n")
-        );
-
-    }
-
-    catch (error) {
-
-        console.error(error);
-
-        alert(
-            "Could not connect to backend."
-        );
-
-    }
-}
-async function loadWeather() {
-
-    const latitude = 17.385;
-    const longitude = 78.4867;
-
-    try {
-        const response = await fetch(
-            `http://127.0.0.1:8000/api/weather?latitude=${latitude}&longitude=${longitude}`
-        );
-
-        if (!response.ok) {
-            throw new Error("Weather API request failed");
-        }
-
-        const weather = await response.json();
-
-        document.getElementById("weatherTemp").textContent =
-            weather.temperature + "°C";
-
-        document.getElementById("weatherHumidity").textContent =
-            weather.humidity + "%";
-
-        document.getElementById("weatherRain").textContent =
-            weather.rain_probability + "%";
-
-        document.getElementById("weatherWind").textContent =
-            weather.wind_speed + " km/h";
-
-    } catch (error) {
-        console.error(error);
-        alert("Unable to load weather data.");
-    }
-}
-new Chart(document.getElementById('riskChart'),{type:'line',data:{labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],datasets:[{label:'Disease risk %',data:[31,38,46,55,64,72,78],tension:.35,fill:false}]},options:{plugins:{legend:{display:false}},scales:{y:{min:0,max:100,grid:{color:'#eef1ec'}},x:{grid:{display:false}}},responsive:true}});
-</script>
+<script src="js/i18n.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

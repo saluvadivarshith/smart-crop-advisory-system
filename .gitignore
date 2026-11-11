@@ -5,6 +5,7 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
 
 # Environment/secrets
 .env
@@ -16,5 +17,12 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Database temporary files
+# SQLite databases and temporary files
+*.db
 *.db-journal
+*.db-wal
+backend/data/
+
+# Large ML datasets (keep model weights & evaluation reports tracked or optional)
+backend/ml/dataset/
+plantvillage dataset/

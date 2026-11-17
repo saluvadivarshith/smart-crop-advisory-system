@@ -220,6 +220,153 @@ CROP_PROFILES = {
         "heat_note": "Good air circulation and trellis support reduce cane and leaf diseases.",
         "stages": [],
     },
+
+    # ------------------------------------------------------------------
+    # Common Indian smallholder crops added for the "Start a New Farm"
+    # planner (pulses, millets and vegetables). No image model for these.
+    # pH / salt / temperature limits: FAO ECOCROP, ICAR crop institutes
+    # (IIPR pulses, IIMR millets, IIVR vegetables) package-of-practices.
+    # ------------------------------------------------------------------
+    "red_gram": {
+        "name": "Red Gram (Tur / Arhar)", "ph": (6.5, 7.5), "salt": "sensitive",
+        "heat_tmax": 38, "cold_tmin": 10, "duration_days": 160,
+        "fym_tonnes_per_acre": (2, 3),
+        "common_diseases": [],
+        "heat_note": "Red gram tolerates heat and dry spells well, but frost at flowering damages pods.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 30), "title": "Emergence & Early Growth (Days 0–30)", "tasks": "Sow on ridges or raised beds so water drains away. Red gram roots rot in waterlogged soil. Keep the field weed-free."},
+            {"stage": "vegetative", "days": (31, 80), "title": "Branching (Days 31–80)", "tasks": "Do 1–2 hand weedings or inter-cultivation. Slow early growth makes red gram easy to intercrop with a short crop like green gram."},
+            {"stage": "flowering", "days": (81, 120), "title": "Flowering (Days 81–120)", "tasks": "Install pheromone traps and bird perches for pod borer. Give one irrigation if there is a long dry spell."},
+            {"stage": "fruiting", "days": (121, 150), "title": "Pod Filling (Days 121–150)", "tasks": "Check pods for borer holes twice a week. Avoid irrigation late in pod filling."},
+            {"stage": "maturity", "days": (151, 180), "title": "Maturity & Harvest (Days 151+)", "tasks": "Harvest when about 80% of pods turn brown. Dry well before threshing and store in clean, dry bags."},
+        ],
+    },
+    "green_gram": {
+        "name": "Green Gram (Moong)", "ph": (6.2, 7.2), "salt": "moderately sensitive",
+        "heat_tmax": 40, "cold_tmin": 15, "duration_days": 70,
+        "fym_tonnes_per_acre": (2, 3),
+        "common_diseases": [],
+        "heat_note": "Green gram is a short, heat-tolerant crop but heavy rain at pod maturity causes pods to sprout.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 15), "title": "Emergence (Days 0–15)", "tasks": "Treat seed with Rhizobium culture before sowing. Ensure good drainage."},
+            {"stage": "vegetative", "days": (16, 30), "title": "Vegetative Growth (Days 16–30)", "tasks": "Hand weed once around day 20–25. Put up yellow sticky traps: whitefly spreads yellow mosaic virus."},
+            {"stage": "flowering", "days": (31, 45), "title": "Flowering (Days 31–45)", "tasks": "Give a light irrigation if soil is dry. Pull out plants with yellow mosaic patches early."},
+            {"stage": "fruiting", "days": (46, 60), "title": "Pod Development (Days 46–60)", "tasks": "Watch for pod borers and sucking pests."},
+            {"stage": "maturity", "days": (61, 75), "title": "Picking & Harvest (Days 61+)", "tasks": "Pick mature black pods in 2–3 rounds before they shatter. Dry pods in the sun before threshing."},
+        ],
+    },
+    "black_gram": {
+        "name": "Black Gram (Urad)", "ph": (6.5, 7.5), "salt": "sensitive",
+        "heat_tmax": 38, "cold_tmin": 15, "duration_days": 80,
+        "fym_tonnes_per_acre": (2, 3),
+        "common_diseases": [],
+        "heat_note": "Black gram needs warm weather; waterlogging and very heavy rain at flowering reduce yield.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 15), "title": "Emergence (Days 0–15)", "tasks": "Treat seed with Rhizobium culture. Sow in well-drained soil."},
+            {"stage": "vegetative", "days": (16, 35), "title": "Vegetative Growth (Days 16–35)", "tasks": "Weed once around day 20–25. Use yellow sticky traps for whitefly (yellow mosaic virus carrier)."},
+            {"stage": "flowering", "days": (36, 50), "title": "Flowering (Days 36–50)", "tasks": "Avoid water stress at flowering. Remove virus-infected plants."},
+            {"stage": "fruiting", "days": (51, 70), "title": "Pod Development (Days 51–70)", "tasks": "Scout for pod borers."},
+            {"stage": "maturity", "days": (71, 85), "title": "Harvest (Days 71+)", "tasks": "Harvest when most pods turn black. Dry and thresh; store in dry conditions."},
+        ],
+    },
+    "chickpea": {
+        "name": "Chickpea (Bengal Gram / Chana)", "ph": (6.0, 8.0), "salt": "sensitive",
+        "heat_tmax": 32, "cold_tmin": 5, "duration_days": 110,
+        "fym_tonnes_per_acre": (2, 3),
+        "common_diseases": [],
+        "heat_note": "Chickpea is a cool-season crop; temperatures above about 32°C at podding cause flower and pod drop.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 20), "title": "Emergence (Days 0–20)", "tasks": "Sow on residual soil moisture after the rains. Treat seed with Rhizobium and Trichoderma to reduce wilt."},
+            {"stage": "vegetative", "days": (21, 45), "title": "Branching (Days 21–45)", "tasks": "Weed once. Nipping the growing tips around day 30–40 encourages more branches (common practice)."},
+            {"stage": "flowering", "days": (46, 75), "title": "Flowering & Podding (Days 46–75)", "tasks": "Install pheromone traps and bird perches for pod borer. If irrigated, give one light irrigation; avoid heavy watering."},
+            {"stage": "fruiting", "days": (76, 95), "title": "Pod Filling (Days 76–95)", "tasks": "Check plants for pod borer larvae twice a week."},
+            {"stage": "maturity", "days": (96, 115), "title": "Maturity & Harvest (Days 96+)", "tasks": "Harvest when leaves turn reddish-brown and dry. Dry seed well before storage."},
+        ],
+    },
+    "onion": {
+        "name": "Onion", "ph": (6.0, 7.0), "salt": "sensitive",
+        "heat_tmax": 35, "cold_tmin": 10, "duration_days": 130,
+        "fym_tonnes_per_acre": (8, 10),
+        "common_diseases": [],
+        "heat_note": "Onion bulbs form best in mild weather; very hot weather at bulbing gives small bulbs.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 45), "title": "Nursery & Transplanting (Days 0–45)", "tasks": "Raise seedlings on raised nursery beds. Transplant 6–7 week old seedlings."},
+            {"stage": "vegetative", "days": (46, 75), "title": "Leaf Growth (Days 46–75)", "tasks": "Weed carefully (onion cannot compete with weeds). Use blue sticky traps to monitor thrips."},
+            {"stage": "flowering", "days": (76, 105), "title": "Bulb Formation (Days 76–105)", "tasks": "Irrigate lightly and regularly. Water stress now gives small or split bulbs."},
+            {"stage": "fruiting", "days": (106, 120), "title": "Bulb Maturity (Days 106–120)", "tasks": "Stop irrigation 10–15 days before harvest when tops start falling."},
+            {"stage": "maturity", "days": (121, 140), "title": "Harvest & Curing (Days 121+)", "tasks": "Cure bulbs in shade for a week before storing in a well-ventilated place."},
+        ],
+    },
+    "brinjal": {
+        "name": "Brinjal (Eggplant)", "ph": (5.5, 6.8), "salt": "moderately sensitive",
+        "heat_tmax": 37, "cold_tmin": 15, "duration_days": 150,
+        "fym_tonnes_per_acre": (8, 10),
+        "common_diseases": [],
+        "heat_note": "Brinjal grows well in warm weather; frost or temperatures below about 15°C stop growth.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 30), "title": "Nursery & Transplanting (Days 0–30)", "tasks": "Raise seedlings under insect-proof net. Transplant 4–5 week old seedlings."},
+            {"stage": "vegetative", "days": (31, 55), "title": "Vegetative Growth (Days 31–55)", "tasks": "Weed and earth up. Install pheromone traps for shoot and fruit borer; cut and destroy wilted shoots."},
+            {"stage": "flowering", "days": (56, 75), "title": "Flowering (Days 56–75)", "tasks": "Keep soil moist. Continue removing borer-damaged shoots."},
+            {"stage": "fruiting", "days": (76, 130), "title": "Fruiting & Picking (Days 76–130)", "tasks": "Pick fruits every 4–6 days. Destroy bored fruits away from the field, do not leave them on the ground."},
+            {"stage": "maturity", "days": (131, 160), "title": "Late Picking & Cleanup (Days 131+)", "tasks": "Remove and destroy old plants after the last picking to break the pest cycle."},
+        ],
+    },
+    "okra": {
+        "name": "Okra (Bhindi / Lady's Finger)", "ph": (6.0, 6.8), "salt": "moderately sensitive",
+        "heat_tmax": 40, "cold_tmin": 15, "duration_days": 100,
+        "fym_tonnes_per_acre": (6, 8),
+        "common_diseases": [],
+        "heat_note": "Okra needs warm soil to germinate and grows well in heat, but very cold nights stop growth.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 15), "title": "Germination (Days 0–15)", "tasks": "Soak seed overnight before sowing for faster germination. Gap-fill missing spots."},
+            {"stage": "vegetative", "days": (16, 35), "title": "Vegetative Growth (Days 16–35)", "tasks": "Weed twice. Put up yellow sticky traps: whitefly spreads yellow vein mosaic virus."},
+            {"stage": "flowering", "days": (36, 45), "title": "Flowering (Days 36–45)", "tasks": "Irrigate regularly. Pull out plants with yellow-veined leaves early."},
+            {"stage": "fruiting", "days": (46, 90), "title": "Fruiting & Picking (Days 46–90)", "tasks": "Pick tender pods every 2–3 days. Install pheromone traps for fruit borer."},
+            {"stage": "maturity", "days": (91, 105), "title": "Final Picking (Days 91+)", "tasks": "Remove old plants after final picking."},
+        ],
+    },
+    "jowar": {
+        "name": "Jowar (Sorghum)", "ph": (6.0, 7.5), "salt": "moderately tolerant",
+        "heat_tmax": 40, "cold_tmin": 12, "duration_days": 110,
+        "fym_tonnes_per_acre": (4, 5),
+        "common_diseases": [],
+        "heat_note": "Jowar is drought-hardy and tolerates heat, making it suitable for rain-fed land.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 25), "title": "Emergence (Days 0–25)", "tasks": "Sow early in the season; late sowing increases shoot fly damage. Thin to one healthy plant per spot."},
+            {"stage": "vegetative", "days": (26, 55), "title": "Vegetative Growth (Days 26–55)", "tasks": "Weed and inter-cultivate. Watch whorls for stem borer damage."},
+            {"stage": "flowering", "days": (56, 75), "title": "Flowering (Days 56–75)", "tasks": "Most sensitive to water stress now; give an irrigation if available."},
+            {"stage": "fruiting", "days": (76, 100), "title": "Grain Filling (Days 76–100)", "tasks": "Protect earheads from birds near maturity."},
+            {"stage": "maturity", "days": (101, 120), "title": "Harvest (Days 101+)", "tasks": "Harvest when grains are hard. Dry well; use stalks as fodder."},
+        ],
+    },
+    "bajra": {
+        "name": "Bajra (Pearl Millet)", "ph": (6.5, 7.5), "salt": "moderately tolerant",
+        "heat_tmax": 42, "cold_tmin": 15, "duration_days": 85,
+        "fym_tonnes_per_acre": (2, 4),
+        "common_diseases": [],
+        "heat_note": "Bajra is one of the most heat- and drought-tolerant cereals, suited to low-rainfall land.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 20), "title": "Emergence (Days 0–20)", "tasks": "Sow with the onset of monsoon. Thin and gap-fill at 2–3 weeks."},
+            {"stage": "vegetative", "days": (21, 40), "title": "Tillering (Days 21–40)", "tasks": "Weed once or twice. Remove plants showing downy mildew (green ear) symptoms."},
+            {"stage": "flowering", "days": (41, 55), "title": "Flowering (Days 41–55)", "tasks": "Avoid water stress at flowering if irrigation is possible."},
+            {"stage": "fruiting", "days": (56, 75), "title": "Grain Filling (Days 56–75)", "tasks": "Guard against birds as grains fill."},
+            {"stage": "maturity", "days": (76, 90), "title": "Harvest (Days 76+)", "tasks": "Harvest earheads when grains are hard and dry."},
+        ],
+    },
+    "ragi": {
+        "name": "Ragi (Finger Millet)", "ph": (5.5, 7.5), "salt": "moderately tolerant",
+        "heat_tmax": 35, "cold_tmin": 10, "duration_days": 115,
+        "fym_tonnes_per_acre": (3, 4),
+        "common_diseases": [],
+        "heat_note": "Ragi is hardy and grows on poor, rain-fed soils; it stores very well after harvest.",
+        "stages": [
+            {"stage": "seedling", "days": (0, 25), "title": "Nursery / Emergence (Days 0–25)", "tasks": "Direct sow in lines or transplant 3–4 week old seedlings."},
+            {"stage": "vegetative", "days": (26, 55), "title": "Tillering (Days 26–55)", "tasks": "Weed twice; ragi is slow at first and weeds compete strongly."},
+            {"stage": "flowering", "days": (56, 80), "title": "Earhead Emergence & Flowering (Days 56–80)", "tasks": "Irrigate if there is a long dry spell. Watch for blast spots on leaves and neck."},
+            {"stage": "fruiting", "days": (81, 100), "title": "Grain Filling (Days 81–100)", "tasks": "Protect from birds."},
+            {"stage": "maturity", "days": (101, 120), "title": "Harvest (Days 101+)", "tasks": "Harvest earheads when they turn brown. Dry and thresh; grain stores for years if kept dry."},
+        ],
+    },
 }
 
 CROP_ALIASES = {
@@ -231,6 +378,13 @@ CROP_ALIASES = {
     "cherry_(including_sour)": "cherry",
     "orange_/_citrus": "orange", "citrus": "orange",
     "squash_/_cucurbit": "squash", "cucurbit": "squash",
+    "tur": "red_gram", "arhar": "red_gram", "pigeonpea": "red_gram", "pigeon_pea": "red_gram", "redgram": "red_gram",
+    "moong": "green_gram", "mung": "green_gram", "greengram": "green_gram",
+    "urad": "black_gram", "blackgram": "black_gram",
+    "gram": "chickpea", "chana": "chickpea", "bengal_gram": "chickpea",
+    "eggplant": "brinjal", "baingan": "brinjal",
+    "bhindi": "okra", "ladies_finger": "okra", "lady's_finger": "okra",
+    "sorghum": "jowar", "pearl_millet": "bajra", "finger_millet": "ragi",
 }
 
 GROWTH_STAGES = ["seedling", "vegetative", "flowering", "fruiting", "maturity"]

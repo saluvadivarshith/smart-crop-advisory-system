@@ -327,3 +327,38 @@ def test_soil_scanner_and_crop_calendar():
     assert cal["water_balance_plot"]["net_deficit_liters"] > 0
     assert cal["organic_manure_guide"]["fym_tonnes_max"] > 0
 
+
+def test_new_farm_plan_and_inputs_advisor():
+    """Verify 'Start a New Farm' wizard and 'What to Buy' fertilizer/IPM advisor."""
+    from backend.services.inputs_service import recommend_inputs
+    from backend.services.new_farm_service import recommend_new_farm_plan
+
+    plan = recommend_new_farm_plan(
+        season="rabi",
+        water_source="limited",
+        budget="low",
+        labour="family",
+        area_acres=1.5,
+        soil_ph=6.8,
+        soil_ec=0.45,
+        soil_n=210.0,
+    )
+    assert plan["season"]["key"] == "rabi"
+    assert len(plan["recommended_crops"]) >= 5
+    assert len(plan["selected_crop_plan"]["pre_sowing_checklist"]) == 6
+    assert len(plan["schemes_and_help"]) >= 5
+
+    inp = recommend_inputs(
+        crop_name="Tomato",
+        area_acres=2.0,
+        soil={"N": 190, "P": 16, "K": 180, "S": 8.0, "Zn": 0.45, "pH": 6.8},
+        prices={"urea": 266, "dap": 1350, "ssp": 550, "mop": 1700},
+    )
+    assert inp["crop"] == "Tomato"
+    assert inp["area_acres"] == 2.0
+    assert inp["fertilizer_plan"]["available"] is True
+    assert inp["fertilizer_plan"]["recommended_option"] == "B"  # Sulphur is low (<10 mg/kg)
+    assert inp["estimated_fertilizer_cost"] > 0
+    assert len(inp["shopping_list"]) >= 5
+
+

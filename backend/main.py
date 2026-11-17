@@ -27,6 +27,8 @@ from backend.schemas import (
     AdvisoryRequest,
     CalendarRequest,
     FarmCreate,
+    InputsRecommendRequest,
+    NewFarmPlanRequest,
     SampleLeafRequest,
     SoilData,
     SoilTextParseRequest,
@@ -39,7 +41,9 @@ from backend.services.crop_service import (
     get_model_status,
     get_sample_leaf_gallery,
 )
+from backend.services.inputs_service import recommend_inputs
 from backend.services.location_service import GeocodingError, reverse_geocode, search_location
+from backend.services.new_farm_service import recommend_new_farm_plan
 from backend.services.risk_service import evaluate_risk
 from backend.services.soil_service import analyze_soil
 from backend.services.weather_service import WeatherServiceError, get_weather
@@ -211,6 +215,33 @@ def api_crop_calendar(req: CalendarRequest):
         current_stage=req.growth_stage,
         area_acres=req.area_acres,
         weather_result=req.weather_result,
+    )
+
+
+@app.post("/api/new-farm/plan")
+def api_new_farm_plan(req: NewFarmPlanRequest):
+    return recommend_new_farm_plan(
+        season=req.season,
+        water_source=req.water_source,
+        budget=req.budget,
+        labour=req.labour,
+        area_acres=req.area_acres,
+        soil_ph=req.soil_ph,
+        soil_ec=req.soil_ec,
+        soil_n=req.soil_n,
+        selected_crop=req.selected_crop,
+    )
+
+
+@app.post("/api/inputs/recommend")
+def api_inputs_recommend(req: InputsRecommendRequest):
+    return recommend_inputs(
+        crop_name=req.crop_name,
+        area_acres=req.area_acres,
+        soil=req.soil_values,
+        crop_result=req.crop_result,
+        shc_npk=req.shc_npk,
+        prices=req.prices,
     )
 
 

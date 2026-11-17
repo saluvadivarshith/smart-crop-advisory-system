@@ -23,10 +23,12 @@
 
       <nav>
         <button class="active" data-page="dashboard">📊 <span data-i18n="nav_dashboard">Dashboard</span></button>
+        <button data-page="newfarm">🌱 <span data-i18n="nav_newfarm">Start a New Farm</span></button>
         <button data-page="farm">📍 <span data-i18n="nav_farm">Farm Profile & Location</span></button>
         <button data-page="analysis">🍃 <span data-i18n="nav_crop">Crop Leaf Analysis</span></button>
         <button data-page="soil">🧪 <span data-i18n="nav_soil">Soil Health Card</span></button>
         <button data-page="weather">🌦️ <span data-i18n="nav_weather">Farm Weather</span></button>
+        <button data-page="inputs">🛒 <span data-i18n="nav_inputs">What to Buy (Inputs)</span></button>
         <button data-page="advisory">📋 <span data-i18n="nav_advisory">Smart Advisory</span></button>
         <button data-page="history">🗂️ <span data-i18n="nav_history">Assessment History</span></button>
       </nav>
@@ -590,6 +592,167 @@
             <tbody id="historyTableBody"></tbody>
           </table>
         </div>
+      </div>
+    </section>
+
+    <!-- 8. START A NEW FARM (BEGINNER WIZARD) -->
+    <section id="newfarm" class="page">
+      <div class="top">
+        <div>
+          <h1>🌱 Start a New Farm — Step-by-Step Beginner Guide</h1>
+          <p>No prior farming knowledge needed: tell us about your land, water, budget, and labour to get a ranked shortlist of suitable crops, a pre-sowing checklist, and government support schemes</p>
+        </div>
+        <div class="top-actions">
+          <button onclick="runNewFarmWizard()">🔍 Find Best Crops for My Land</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card w12">
+          <h2>Steps 1–3: Your Land, Resources & Optional Soil Info</h2>
+          <div class="form-grid" style="margin-top:10px">
+            <label for="nfSeason">
+              Upcoming / Target Season
+              <select id="nfSeason">
+                <option value="auto" selected>Auto-detect from current month</option>
+                <option value="kharif">Kharif (Monsoon: June–October)</option>
+                <option value="rabi">Rabi (Winter: October–March)</option>
+                <option value="zaid">Zaid (Summer: March–June)</option>
+              </select>
+            </label>
+            <label for="nfWater">
+              Water Source Available
+              <select id="nfWater">
+                <option value="rain_only">Rain only (no borewell or canal)</option>
+                <option value="limited" selected>Limited irrigation (shared well / tank / few waterings)</option>
+                <option value="assured">Assured irrigation (own borewell or canal)</option>
+              </select>
+            </label>
+            <label for="nfBudget">
+              Starting Budget Band
+              <select id="nfBudget">
+                <option value="low" selected>Low — keep seed & input costs minimal</option>
+                <option value="medium">Medium — moderate investment</option>
+                <option value="high">High — can invest in higher-value vegetable/cash crops</option>
+              </select>
+            </label>
+            <label for="nfLabour">
+              Available Farm Labour
+              <select id="nfLabour">
+                <option value="self">Mostly just me</option>
+                <option value="family" selected>Family members help</option>
+                <option value="hired">Can hire workers when needed</option>
+              </select>
+            </label>
+            <label for="nfArea">
+              Plot Size (Acres) <span class="unit-hint">(auto-filled from Farm Profile if saved)</span>
+              <input id="nfArea" type="number" step="0.05" min="0.05" value="1.0">
+            </label>
+            <label for="nfFocusCrop">
+              Inspect Checklist for Specific Crop (Optional)
+              <select id="nfFocusCrop">
+                <option value="">Auto-pick #1 Ranked Crop</option>
+                <option value="green_gram">Green Gram (Moong)</option>
+                <option value="red_gram">Red Gram (Tur / Arhar)</option>
+                <option value="chickpea">Chickpea (Chana)</option>
+                <option value="groundnut">Groundnut</option>
+                <option value="soybean">Soybean</option>
+                <option value="maize">Maize (Corn)</option>
+                <option value="jowar">Jowar (Sorghum)</option>
+                <option value="bajra">Bajra (Pearl Millet)</option>
+                <option value="ragi">Ragi (Finger Millet)</option>
+                <option value="rice">Rice (Paddy)</option>
+                <option value="wheat">Wheat</option>
+                <option value="okra">Okra (Bhindi)</option>
+                <option value="brinjal">Brinjal (Eggplant)</option>
+                <option value="onion">Onion</option>
+                <option value="tomato">Tomato</option>
+                <option value="potato">Potato</option>
+                <option value="chilli">Chilli</option>
+                <option value="cotton">Cotton</option>
+              </select>
+            </label>
+          </div>
+          <div class="btn-row" style="margin-top:14px">
+            <button onclick="runNewFarmWizard()">🌱 Generate My New Farm Plan</button>
+            <button class="secondary" onclick="switchPage('farm')">📍 Draw / Measure Plot on Map</button>
+            <button class="secondary" onclick="switchPage('soil')">🧪 Enter Soil Health Card</button>
+          </div>
+        </div>
+
+        <div id="newFarmResultsWrap" class="w12"></div>
+      </div>
+    </section>
+
+    <!-- 9. WHAT TO BUY — FERTILIZERS, BIO-INPUTS, IPM & WEED MANAGEMENT -->
+    <section id="inputs" class="page">
+      <div class="top">
+        <div>
+          <h1>🛒 What to Buy — Fertilizers, Bio-Inputs, Pest & Weed Guide</h1>
+          <p>Plot-scaled fertilizer bags (Urea / DAP / SSP / MOP), organic manure, bio-fertilizers, IPM pest traps, and safe buying checklist</p>
+        </div>
+        <div class="top-actions">
+          <button onclick="runInputsAdvisor()">🧮 Calculate My Shopping List</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card w12">
+          <h2>1. Crop, Plot Area & Optional Local Bag Prices</h2>
+          <div class="form-grid" style="margin-top:10px">
+            <label for="inpCrop">
+              Crop Name
+              <select id="inpCrop">
+                <option value="Tomato">Tomato</option>
+                <option value="Potato">Potato</option>
+                <option value="Pepper">Bell Pepper / Capsicum</option>
+                <option value="Chilli">Chilli</option>
+                <option value="Maize">Maize (Corn)</option>
+                <option value="Rice">Rice (Paddy)</option>
+                <option value="Cotton">Cotton</option>
+                <option value="Wheat">Wheat</option>
+                <option value="Groundnut">Groundnut</option>
+                <option value="Soybean">Soybean</option>
+                <option value="Red Gram">Red Gram (Tur / Arhar)</option>
+                <option value="Green Gram">Green Gram (Moong)</option>
+                <option value="Black Gram">Black Gram (Urad)</option>
+                <option value="Chickpea">Chickpea (Bengal Gram / Chana)</option>
+                <option value="Onion">Onion</option>
+                <option value="Brinjal">Brinjal (Eggplant)</option>
+                <option value="Okra">Okra (Bhindi)</option>
+                <option value="Jowar">Jowar (Sorghum)</option>
+                <option value="Bajra">Bajra (Pearl Millet)</option>
+                <option value="Ragi">Ragi (Finger Millet)</option>
+              </select>
+            </label>
+            <label for="inpArea">
+              Plot Area (Acres)
+              <input id="inpArea" type="number" step="0.05" min="0.05" value="1.0">
+            </label>
+            <label for="priceUrea">
+              Urea 45 kg Bag Price (₹, optional)
+              <input id="priceUrea" type="number" step="1" min="0" placeholder="e.g. 266">
+            </label>
+            <label for="priceDap">
+              DAP 50 kg Bag Price (₹, optional)
+              <input id="priceDap" type="number" step="1" min="0" placeholder="e.g. 1350">
+            </label>
+            <label for="priceSsp">
+              SSP 50 kg Bag Price (₹, optional)
+              <input id="priceSsp" type="number" step="1" min="0" placeholder="e.g. 550">
+            </label>
+            <label for="priceMop">
+              MOP 50 kg Bag Price (₹, optional)
+              <input id="priceMop" type="number" step="1" min="0" placeholder="e.g. 1700">
+            </label>
+          </div>
+          <div class="btn-row" style="margin-top:14px">
+            <button onclick="runInputsAdvisor()">🛒 Calculate Fertilizers, IPM & Shopping List</button>
+            <button class="secondary" onclick="fillSampleBagPrices()">💡 Fill Typical Retail Bag Prices</button>
+          </div>
+        </div>
+
+        <div id="inputsResultsWrap" class="w12"></div>
       </div>
     </section>
   </main>

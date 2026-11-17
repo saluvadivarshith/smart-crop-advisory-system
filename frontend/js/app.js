@@ -96,6 +96,28 @@ function switchPage(pageId) {
       if (state.map) state.map.invalidateSize();
     }, 120);
   }
+  if (pageId === "newfarm") {
+    if (state.activeFarm && state.activeFarm.area_acres) {
+      const nfArea = document.getElementById("nfArea");
+      if (nfArea) nfArea.value = state.activeFarm.area_acres;
+    }
+    const wrap = document.getElementById("newFarmResultsWrap");
+    if (wrap && !wrap.innerHTML.trim()) {
+      window.runNewFarmWizard(false);
+    }
+  }
+  if (pageId === "inputs") {
+    if (state.activeFarm) {
+      const inpArea = document.getElementById("inpArea");
+      const inpCrop = document.getElementById("inpCrop");
+      if (inpArea && state.activeFarm.area_acres) inpArea.value = state.activeFarm.area_acres;
+      if (inpCrop && state.activeFarm.crop_name) inpCrop.value = state.activeFarm.crop_name;
+    }
+    const wrap = document.getElementById("inputsResultsWrap");
+    if (wrap && !wrap.innerHTML.trim()) {
+      window.runInputsAdvisor(false);
+    }
+  }
 }
 
 function getSelectedCrop() {
@@ -2071,3 +2093,412 @@ window.deleteAssessmentById = async function (id) {
     showToast("Could not delete assessment.");
   }
 };
+
+// -------------------------
+// Start a New Farm (Beginner Wizard)
+// -------------------------
+
+function getEnteredSoilValuesMap() {
+  const vals = {};
+  SOIL_PARAMS.forEach((p) => {
+    const el = document.getElementById(`soil_${p.id}`);
+    if (el && el.value.trim() !== "") {
+      const v = parseFloat(el.value);
+      if (!Number.isNaN(v)) vals[p.id] = v;
+    }
+  });
+  return vals;
+}
+
+window.runNewFarmWizard = async function (notify = true) {
+  const seasonVal = (document.getElementById("nfSeason") || {}).value || "auto";
+  const waterVal = (document.getElementById("nfWater") || {}).value || "limited";
+  const budgetVal = (document.getElementById("nfBudget") || {}).value || "low";
+  const labourVal = (document.getElementById("nfLabour") || {}).value || "family";
+  const areaVal = parseFloat((document.getElementById("nfArea") || {}).value) || 1.0;
+  const focusCropVal = (document.getElementById("nfFocusCrop") || {}).value || null;
+  const soilMap = getEnteredSoilValuesMap();
+
+  const payload = {
+    season: seasonVal === "auto" ? null : seasonVal,
+    water_source: waterVal,
+    budget: budgetVal,
+    labour: labourVal,
+    area_acres: areaVal,
+    soil_ph: soilMap.pH ?? null,
+    soil_ec: soilMap.EC ?? null,
+    soil_n: soilMap.N ?? null,
+    selected_crop: focusCropVal,
+  };
+
+  const wrap = document.getElementById("newFarmResultsWrap");
+  try {
+    const resp = await fetch(`${API_BASE}/api/new-farm/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Failed to generate new farm plan");
+
+    renderNewFarmPlan(data);
+    if (notify) {
+      showToast(`Top recommended crop for ${data.season.name}: ${data.recommended_crops[0].crop_name}`);
+    }
+  } catch (err) {
+    if (wrap) wrap.innerHTML = `<div class="alert red">${escapeHtml(err.message)}</div>`;
+    if (notify) showToast(err.message);
+  }
+};
+
+window.selectNewFarmCrop = function (cropKey, cropName) {
+  const focusEl = document.getElementById("nfFocusCrop");
+  if (focusEl) focusEl.value = cropKey;
+  const inpCrop = document.getElementById("inpCrop");
+  if (inpCrop) inpCrop.value = cropName;
+  const cropSel = document.getElementById("cropSelect");
+  if (cropSel) cropSel.value = cropName;
+  window.runNewFarmWizard(true);
+};
+
+function renderNewFarmPlan(data) {
+  const wrap = document.getElementById("newFarmResultsWrap");
+  if (!wrap || !data) return;
+
+  const cropRows = (data.recommended_crops || [])
+    .map((c, idx) => {
+      const pillCls =
+        c.suitability_score >= 75 ? "ok" : c.suitability_score >= 55 ? "attention" : "problem";
+      const whyList = (c.why_it_fits || []).map((r) => `✓ ${escapeHtml(r)}`).join("<br>");
+      const cautionList = (c.cautions || []).map((r) => `⚠️ ${escapeHtml(r)}`).join("<br>");
+      return `
+        <tr>
+          <td><b>#${idx + 1} ${escapeHtml(c.crop_name)}</b><div class="sub">${escapeHtml(c.category)} · ${c.duration_days} days</div></td>
+          <td><span class="pill ${pillCls}">${c.suitability_score}/100 (${escapeHtml(c.suitability_label)})</span></td>
+          <td>Water: <b>${escapeHtml(c.water_need)}</b><br>Cost: <b>${escapeHtml(c.cost_level)}</b> · Labour: <b>${escapeHtml(c.labour_need)}</b></td>
+          <td>${escapeHtml(c.sowing_method)}<div class="sub">Spacing: ${escapeHtml(c.spacing)} · pH ${escapeHtml(c.preferred_ph)}</div></td>
+          <td style="font-size:12.5px">${whyList}${cautionList ? `<div style="margin-top:4px;color:var(--warn)">${cautionList}</div>` : ""}</td>
+          <td>
+            <button class="secondary" onclick="selectNewFarmCrop('${escapeHtml(c.crop_key)}', '${escapeHtml(c.crop_name)}')">View Checklist</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  const sp = data.selected_crop_plan || {};
+  const checklistHtml = (sp.pre_sowing_checklist || [])
+    .map(
+      (item) => `
+      <div class="rec">
+        <div class="dot">${item.step}</div>
+        <div>
+          <b>${escapeHtml(item.title)}</b>
+          <div class="sub">${escapeHtml(item.detail)}</div>
+        </div>
+      </div>`
+    )
+    .join("");
+
+  const stagesHtml = (sp.stages || [])
+    .map(
+      (st) => `
+      <div class="stage-node active">
+        <div class="stage-day">Days ${st.days[0]}–${st.days[1]}</div>
+        <div class="stage-name">${escapeHtml(st.title)}</div>
+        <div class="stage-focus">${escapeHtml(st.tasks)}</div>
+      </div>`
+    )
+    .join("");
+
+  const schemesHtml = (data.schemes_and_help || [])
+    .map(
+      (sc) => `
+      <tr>
+        <td><b>${escapeHtml(sc.name)}</b></td>
+        <td>${escapeHtml(sc.what)}</td>
+        <td>${escapeHtml(sc.how)} ${sc.link ? `· <a href="${escapeHtml(sc.link)}" target="_blank" rel="noopener">Official Portal ↗</a>` : ""}</td>
+      </tr>`
+    )
+    .join("");
+
+  wrap.innerHTML = `
+    <div class="card" style="margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <h2>Step 4: Ranked Crop Shortlist for ${escapeHtml(data.season.name)}</h2>
+          <p class="sub">${escapeHtml(data.season.about)} · Plot: <b>${data.resources.area_acres} ac (${data.resources.area_guntas} guntas)</b></p>
+        </div>
+        <button onclick="switchPage('inputs')">🛒 See What Fertilizers & Inputs to Buy →</button>
+      </div>
+      <div class="table-wrap" style="margin-top:10px">
+        <table>
+          <thead>
+            <tr>
+              <th>Crop & Duration</th>
+              <th>Suitability</th>
+              <th>Water / Cost / Labour</th>
+              <th>Sowing & Spacing</th>
+              <th>Why It Fits / Cautions</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>${cropRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-bottom:18px">
+      <div class="card w6">
+        <h2>Step 5: Before You Sow — Checklist for ${escapeHtml(sp.crop_name)}</h2>
+        <p class="sub">Duration: ~${sp.duration_days} days · Spacing: <b>${escapeHtml(sp.spacing)}</b> · Preferred pH: ${escapeHtml(sp.preferred_ph)}</p>
+        <div style="margin-top:10px">${checklistHtml}</div>
+      </div>
+      <div class="card w6">
+        <h2>Step 6: Season-Long Stage Roadmap (${escapeHtml(sp.crop_name)})</h2>
+        <p class="sub">${escapeHtml(sp.heat_note || "Follow stage-wise irrigation and scouting tasks below.")}</p>
+        <div class="stage-timeline" style="grid-template-columns:1fr;margin-top:10px">${stagesHtml}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Step 7: Free Government Support, Soil Testing & Helplines for New Farmers</h2>
+      <div class="table-wrap" style="margin-top:10px">
+        <table>
+          <thead>
+            <tr><th>Scheme / Institution</th><th>What Support You Get</th><th>How to Access</th></tr>
+          </thead>
+          <tbody>${schemesHtml}</tbody>
+        </table>
+      </div>
+      <p class="sub" style="margin-top:10px">${escapeHtml(data.disclaimer)}</p>
+    </div>
+  `;
+}
+
+// -------------------------
+// What to Buy — Fertilizers, Bio-Inputs, IPM & Weed Guide
+// -------------------------
+
+window.fillSampleBagPrices = function () {
+  document.getElementById("priceUrea").value = 266;
+  document.getElementById("priceDap").value = 1350;
+  document.getElementById("priceSsp").value = 550;
+  document.getElementById("priceMop").value = 1700;
+  window.runInputsAdvisor(true);
+};
+
+window.runInputsAdvisor = async function (notify = true) {
+  const cropName = (document.getElementById("inpCrop") || {}).value || getSelectedCrop();
+  const areaAcres = parseFloat((document.getElementById("inpArea") || {}).value) || 1.0;
+  const soilMap = getEnteredSoilValuesMap();
+
+  const prices = {};
+  const pUrea = parseFloat((document.getElementById("priceUrea") || {}).value);
+  const pDap = parseFloat((document.getElementById("priceDap") || {}).value);
+  const pSsp = parseFloat((document.getElementById("priceSsp") || {}).value);
+  const pMop = parseFloat((document.getElementById("priceMop") || {}).value);
+  if (!Number.isNaN(pUrea) && pUrea > 0) prices.urea = pUrea;
+  if (!Number.isNaN(pDap) && pDap > 0) prices.dap = pDap;
+  if (!Number.isNaN(pSsp) && pSsp > 0) prices.ssp = pSsp;
+  if (!Number.isNaN(pMop) && pMop > 0) prices.mop = pMop;
+
+  const payload = {
+    crop_name: cropName,
+    area_acres: areaAcres,
+    soil_values: Object.keys(soilMap).length ? soilMap : null,
+    crop_result: state.cropResult,
+    prices: Object.keys(prices).length ? prices : null,
+  };
+
+  const wrap = document.getElementById("inputsResultsWrap");
+  try {
+    const resp = await fetch(`${API_BASE}/api/inputs/recommend`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Could not calculate inputs");
+
+    renderInputsAdvisor(data);
+    if (notify) {
+      showToast(`Shopping list calculated for ${data.area_acres} ac (${data.area_guntas} guntas) of ${data.crop}.`);
+    }
+  } catch (err) {
+    if (wrap) wrap.innerHTML = `<div class="alert red">${escapeHtml(err.message)}</div>`;
+    if (notify) showToast(err.message);
+  }
+};
+
+function renderInputsAdvisor(data) {
+  const wrap = document.getElementById("inputsResultsWrap");
+  if (!wrap || !data) return;
+
+  const fp = data.fertilizer_plan || {};
+  let fertHtml = "";
+  if (!fp.available) {
+    fertHtml = `<div class="alert">${escapeHtml(fp.message)}</div>`;
+  } else {
+    const renderOptRows = (items) =>
+      (items || [])
+        .map(
+          (i) => `
+        <tr>
+          <td><b>${escapeHtml(i.product)}</b></td>
+          <td><b>${i.kg} kg</b></td>
+          <td>${i.bags_exact} bags (${i.bag_kg} kg bag) → <b>Buy ${i.bags_to_buy} bag(s)</b></td>
+          <td>${i.estimated_cost != null ? `<b>₹${i.estimated_cost.toLocaleString()}</b>` : '<span class="sub">Enter bag price above</span>'}</td>
+        </tr>`
+        )
+        .join("");
+
+    const schedHtml = (fp.split_schedule || [])
+      .map(
+        (s) => `
+      <div class="rec">
+        <div class="dot">D${s.day}</div>
+        <div>
+          <b>${escapeHtml(s.when)}</b>: ${escapeHtml((s.items || []).join(" + "))}
+          <div class="sub">${escapeHtml(s.note)}</div>
+        </div>
+      </div>`
+      )
+      .join("");
+
+    fertHtml = `
+      <div class="alert green">
+        <b>Recommended Fertilizer Combination: Option ${escapeHtml(fp.recommended_option)}</b> — ${escapeHtml(fp.why_option)}
+        <div class="sub" style="margin-top:4px">
+          Nutrient target for ${data.area_acres} ac (${data.area_guntas} guntas):
+          <b>N: ${fp.dose_for_plot_kg.N} kg</b> · <b>P₂O₅: ${fp.dose_for_plot_kg.P2O5} kg</b> · <b>K₂O: ${fp.dose_for_plot_kg.K2O} kg</b>
+          (${escapeHtml(fp.source)})
+        </div>
+      </div>
+      ${
+        (fp.soil_adjustments || []).length
+          ? `<ul class="sub" style="margin:6px 0 12px">${fp.soil_adjustments.map((a) => `<li>${escapeHtml(a)}</li>`).join("")}</ul>`
+          : ""
+      }
+      <div class="grid">
+        <div class="w6">
+          <h3>${escapeHtml(fp.option_a.title)} ${fp.recommended_option === "A" ? '<span class="pill ok">Recommended</span>' : ""}</h3>
+          <table>
+            <thead><tr><th>Fertilizer</th><th>Plot Need</th><th>Bags</th><th>Est. Cost</th></tr></thead>
+            <tbody>${renderOptRows(fp.option_a.items)}</tbody>
+          </table>
+        </div>
+        <div class="w6">
+          <h3>${escapeHtml(fp.option_b.title)} ${fp.recommended_option === "B" ? '<span class="pill ok">Recommended</span>' : ""}</h3>
+          <table>
+            <thead><tr><th>Fertilizer</th><th>Plot Need</th><th>Bags</th><th>Est. Cost</th></tr></thead>
+            <tbody>${renderOptRows(fp.option_b.items)}</tbody>
+          </table>
+          <div class="sub" style="margin-top:4px">Also supplies ~<b>${fp.option_b.sulphur_supplied_kg} kg Sulphur (S)</b> to the soil.</div>
+        </div>
+      </div>
+      <h3 style="margin-top:16px">Split Application Schedule (When to Apply)</h3>
+      <div>${schedHtml}</div>
+    `;
+  }
+
+  const shopRows = (data.shopping_list || [])
+    .map(
+      (s) => `
+    <tr>
+      <td><span class="pill ok">${escapeHtml(s.category)}</span></td>
+      <td><b>${escapeHtml(s.item)}</b></td>
+      <td>${escapeHtml(s.quantity)}</td>
+      <td>${s.cost != null ? `<b>₹${s.cost.toLocaleString()}</b>` : "—"}</td>
+    </tr>`
+    )
+    .join("");
+
+  const pp = data.plant_protection || {};
+  const detectedHtml = pp.detected_problem
+    ? `<div class="alert red">
+         <b>Active Leaf Problem Detected: ${escapeHtml(pp.detected_problem.name)} (${escapeHtml(pp.detected_problem.type)})</b>
+         <div class="sub">${escapeHtml(pp.detected_problem.source)} — ${escapeHtml(pp.detected_problem.about)}</div>
+       </div>`
+    : "";
+
+  const toolsRows = (pp.monitoring_tools || [])
+    .map(
+      (t) => `
+    <tr>
+      <td><b>${escapeHtml(t.product)}</b></td>
+      <td>${escapeHtml((t.for || []).join(", "))}</td>
+      <td>${escapeHtml(t.why)} <div class="sub">${escapeHtml(t.how)}</div></td>
+    </tr>`
+    )
+    .join("");
+
+  const bioRows = (pp.bio_options || [])
+    .map(
+      (b) => `
+    <tr>
+      <td><b>${escapeHtml(b.product)}</b></td>
+      <td>${escapeHtml(b.why)}</td>
+      <td>${escapeHtml(b.how)}</td>
+    </tr>`
+    )
+    .join("");
+
+  const wm = data.weed_management || {};
+
+  wrap.innerHTML = `
+    <div class="card" style="margin-bottom:18px">
+      <h2>2. Complete Plot Shopping List — ${escapeHtml(data.crop)} (${data.area_acres} Acres / ${data.area_guntas} Guntas)</h2>
+      ${
+        data.estimated_fertilizer_cost != null
+          ? `<div class="alert blue"><b>Estimated Fertilizer Cost (Recommended Option): ₹${data.estimated_fertilizer_cost.toLocaleString()}</b></div>`
+          : ""
+      }
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Category</th><th>Input / Item to Buy</th><th>Plot-Scaled Quantity</th><th>Est. Cost</th></tr></thead>
+          <tbody>${shopRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:18px">
+      <h2>3. Fertilizer Calculator & Split Schedule (Urea / DAP / SSP / MOP)</h2>
+      ${fertHtml}
+    </div>
+
+    <div class="grid" style="margin-bottom:18px">
+      <div class="card w6">
+        <h2>4. Pest & Disease Protection (IPM Buying Guide)</h2>
+        ${detectedHtml}
+        <h3>Low-Cost Traps & Monitoring Tools</h3>
+        <table>
+          <thead><tr><th>Tool</th><th>Target Pest</th><th>Why & How to Use</th></tr></thead>
+          <tbody>${toolsRows || '<tr><td colspan="3">Scout crop weekly for pests.</td></tr>'}</tbody>
+        </table>
+        <h3 style="margin-top:14px">Biological & Botanical Products (First-Line Sprays)</h3>
+        <table>
+          <thead><tr><th>Bio-Input</th><th>What It Controls</th><th>Usage</th></tr></thead>
+          <tbody>${bioRows}</tbody>
+        </table>
+      </div>
+
+      <div class="card w6">
+        <h2>5. Weed Management, Herbicides & Safe Buying Rules</h2>
+        <div class="alert">
+          <b>Critical Weed-Free Period:</b> First <b>${wm.critical_weed_free_days} days</b> after sowing.
+        </div>
+        <ul style="padding-left:18px;font-size:13.5px">
+          ${(wm.practices || []).map((p) => `<li style="margin-bottom:6px">${escapeHtml(p)}</li>`).join("")}
+        </ul>
+        <p class="sub" style="margin-top:8px"><b>Herbicide Guidance:</b> ${escapeHtml(wm.herbicide_note || "")}</p>
+
+        <h3 style="margin-top:14px">Where to Buy Genuine Inputs Safely</h3>
+        <ul style="padding-left:18px;font-size:13px">
+          ${(data.where_to_buy || []).map((w) => `<li style="margin-bottom:5px"><b>${escapeHtml(w.name)}:</b> ${escapeHtml(w.note)}</li>`).join("")}
+        </ul>
+      </div>
+    </div>
+    <p class="sub">${escapeHtml(data.disclaimer)}</p>
+  `;
+}

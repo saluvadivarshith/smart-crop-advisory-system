@@ -86,3 +86,24 @@ class CalendarRequest(BaseModel):
     growth_stage: Optional[str] = Field(default="vegetative", max_length=40)
     area_acres: Optional[float] = Field(default=1.0, ge=0, le=10000)
     weather_result: Optional[dict[str, Any]] = None
+
+
+class NewFarmPlanRequest(BaseModel):
+    season: Optional[str] = Field(default=None, description="kharif, rabi, zaid, or auto")
+    water_source: str = Field(default="limited", description="rain_only, limited, or assured")
+    budget: str = Field(default="low", description="low, medium, or high")
+    labour: str = Field(default="family", description="self, family, or hired")
+    area_acres: Optional[float] = Field(default=1.0, ge=0, le=10000)
+    soil_ph: Optional[float] = Field(default=None, ge=2.0, le=12.0)
+    soil_ec: Optional[float] = Field(default=None, ge=0.0, le=50.0)
+    soil_n: Optional[float] = Field(default=None, ge=0.0, le=5000.0)
+    selected_crop: Optional[str] = Field(default=None, max_length=80)
+
+
+class InputsRecommendRequest(BaseModel):
+    crop_name: str = Field(default="Tomato", max_length=80)
+    area_acres: Optional[float] = Field(default=1.0, ge=0, le=10000)
+    soil_values: Optional[dict[str, Any]] = None
+    crop_result: Optional[dict[str, Any]] = None
+    shc_npk: Optional[dict[str, Any]] = None
+    prices: Optional[dict[str, Any]] = None

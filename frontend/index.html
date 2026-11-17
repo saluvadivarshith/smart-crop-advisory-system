@@ -5,16 +5,42 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>CropSense — Smart Crop Advisory System for Small & Marginal Farmers</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css?v=4">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body.auth-locked {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #081c15 0%, #1b4332 55%, #2d6a4f 100%);
+    }
+    body.auth-locked #appShell {
+      display: none !important;
+    }
+    body.auth-locked #authModal {
+      display: flex !important;
+      position: fixed;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 16px;
+      overflow-y: auto;
+    }
+  </style>
 </head>
-<body>
-<div class="shell">
+<body class="auth-locked">
+<div id="appShell" class="shell" style="display:none">
   <aside>
     <div>
       <div class="brand">🌿 Crop<span>Sense</span></div>
       <div class="brand-sub" data-i18n="brand_sub">Smart Crop Advisory for Small & Marginal Farmers</div>
+
+      <div id="authSidebarBox" class="auth-sidebar-box">
+        <div class="auth-user-name">👤 Guest Farmer</div>
+        <div class="auth-user-contact">Sign in with Email or Mobile No.</div>
+        <button class="auth-btn-small" onclick="openAuthModal('signin')">🔑 Sign In / Sign Up</button>
+      </div>
 
       <div class="active-farm-box">
         <small data-i18n="active_farm_label">Selected Farm</small>
@@ -28,7 +54,7 @@
         <button data-page="analysis">🍃 <span data-i18n="nav_crop">Crop Leaf Analysis</span></button>
         <button data-page="soil">🧪 <span data-i18n="nav_soil">Soil Health Card</span></button>
         <button data-page="weather">🌦️ <span data-i18n="nav_weather">Farm Weather</span></button>
-        <button data-page="inputs">🛒 <span data-i18n="nav_inputs">What to Buy (Inputs)</span></button>
+        <button data-page="inputs">🛒 <span data-i18n="nav_inputs">Market</span></button>
         <button data-page="advisory">📋 <span data-i18n="nav_advisory">Smart Advisory</span></button>
         <button data-page="history">🗂️ <span data-i18n="nav_history">Assessment History</span></button>
       </nav>
@@ -758,9 +784,119 @@
   </main>
 </div>
 
+<!-- MANDATORY FARMER AUTHENTICATION & 2-STEP VERIFICATION PORTAL -->
+<div id="authModal" class="modal-backdrop show" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+  <div class="auth-modal-card">
+    <div style="text-align:center;margin-bottom:10px">
+      <div style="font-size:26px;font-weight:800;color:#1b4332">🌿 CropSense</div>
+      <div class="sub">Smart Crop Advisory System for Small & Marginal Farmers</div>
+    </div>
+
+    <div id="authStep1Wrap">
+      <div class="auth-tabs">
+        <button id="tabBtnSignin" class="auth-tab-btn active" onclick="switchAuthTab('signin')">Sign In (Existing User)</button>
+        <button id="tabBtnSignup" class="auth-tab-btn" onclick="switchAuthTab('signup')">Sign Up (New User)</button>
+      </div>
+
+      <div id="authAlertBox"></div>
+
+      <!-- SIGN IN FORM (STEP 1) -->
+      <form id="signinForm" class="auth-form-stack" onsubmit="submitSignin(event)">
+        <label for="signinIdentifier">
+          Gmail Address OR Mobile Number *
+          <input id="signinIdentifier" type="text" required placeholder="e.g. farmer@gmail.com OR 9876543210" autocomplete="username">
+        </label>
+        <label for="signinPassword">
+          Password *
+          <input id="signinPassword" type="password" required minlength="6" placeholder="Enter your password" autocomplete="current-password">
+        </label>
+        <button type="submit" id="btnSubmitSignin">🔐 Continue to 2-Step Verification →</button>
+        <div class="auth-or-divider">
+          New to CropSense? <a href="#" onclick="switchAuthTab('signup'); return false;"><b>Create a new farmer account →</b></a>
+        </div>
+      </form>
+
+      <!-- SIGN UP FORM (STEP 1) -->
+      <form id="signupForm" class="auth-form-stack" style="display:none" onsubmit="submitSignup(event)">
+        <label for="signupName">
+          Full Name *
+          <input id="signupName" type="text" required minlength="2" placeholder="e.g. Raju Kumar" autocomplete="name">
+        </label>
+        <label for="signupPhone">
+          Mobile Number (10 digits) <span class="unit-hint">(For SMS OTP verification)</span>
+          <input id="signupPhone" type="tel" placeholder="e.g. 9876543210" autocomplete="tel">
+        </label>
+        <label for="signupEmail">
+          Gmail / Email Address <span class="unit-hint">(For Gmail OTP verification)</span>
+          <input id="signupEmail" type="email" placeholder="e.g. farmer@gmail.com" autocomplete="email">
+        </label>
+        <label for="signupChannel">
+          2-Step Verification Method (If both Email & Phone are entered)
+          <select id="signupChannel">
+            <option value="auto" selected>Auto (Gmail if email entered, SMS if phone entered)</option>
+            <option value="email">📧 Verify via Gmail Code</option>
+            <option value="sms">📱 Verify via Mobile SMS Code</option>
+          </select>
+        </label>
+        <label for="signupPassword">
+          Create Password * <span class="unit-hint">(at least 6 characters)</span>
+          <input id="signupPassword" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="new-password">
+        </label>
+        <button type="submit" id="btnSubmitSignup">📩 Send 6-Digit Verification Code →</button>
+        <div class="auth-or-divider">
+          Already have an account? <a href="#" onclick="switchAuthTab('signin'); return false;"><b>Sign in here →</b></a>
+        </div>
+      </form>
+    </div>
+
+    <!-- STEP 2: 6-DIGIT OTP VERIFICATION (GMAIL OR SMS) -->
+    <div id="authStep2Wrap" style="display:none">
+      <h3 id="otpStepTitle" style="margin:6px 0 4px;text-align:center">🔒 2-Step Verification</h3>
+      <p id="otpStepSub" class="sub" style="text-align:center;margin-bottom:12px"></p>
+
+      <div id="otpAlertBox"></div>
+      <div id="otpSimulatedInbox"></div>
+
+      <form id="otpVerifyForm" class="auth-form-stack" onsubmit="submitVerifyOtp(event)">
+        <label for="otpCodeInput" style="text-align:center">
+          Enter 6-Digit Verification Code
+          <input id="otpCodeInput" class="otp-code-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required placeholder="000000" autocomplete="one-time-code">
+        </label>
+        <button type="submit" id="btnVerifyOtp">✅ Verify Code & Unlock CropSense</button>
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-top:4px">
+          <button type="button" class="secondary" style="flex:1" onclick="resendOtpCode()">🔄 Resend Code</button>
+          <button type="button" class="secondary" style="flex:1" onclick="backToAuthStep1()">← Back</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- OPTIONAL REAL GMAIL SMTP / FAST2SMS SENDER CONFIG -->
+    <details style="margin-top:16px;border-top:1px solid var(--line);padding-top:10px;font-size:12px">
+      <summary style="cursor:pointer;color:var(--muted);font-weight:600">⚙️ Configure Live Gmail SMTP / SMS Gateway (Optional)</summary>
+      <div class="auth-form-stack" style="margin-top:10px">
+        <div class="sub">To send real emails to any Gmail address, enter your sender Gmail &amp; 16-character Google App Password (or Fast2SMS API key for carrier SMS):</div>
+        <label for="cfgSmtpEmail">
+          Sender Gmail Address
+          <input id="cfgSmtpEmail" type="email" placeholder="yourname@gmail.com">
+        </label>
+        <label for="cfgSmtpPass">
+          Google 16-Char App Password
+          <input id="cfgSmtpPass" type="password" placeholder="xxxx xxxx xxxx xxxx">
+        </label>
+        <label for="cfgSmsKey">
+          Fast2SMS API Key (Optional, for Indian Mobile SMS)
+          <input id="cfgSmsKey" type="password" placeholder="Fast2SMS authorization key">
+        </label>
+        <button type="button" class="secondary" onclick="saveSenderConfig()">💾 Save Live Sender Credentials</button>
+        <div id="cfgSenderStatus" class="sub"></div>
+      </div>
+    </details>
+  </div>
+</div>
+
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<script src="js/i18n.js"></script>
-<script src="js/app.js"></script>
+<script src="js/i18n.js?v=4"></script>
+<script src="js/app.js?v=4"></script>
 </body>
 </html>

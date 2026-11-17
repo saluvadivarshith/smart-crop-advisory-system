@@ -972,3 +972,165 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+/* Farmer Authentication Modal & Sidebar Account Box */
+.auth-sidebar-box {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  color: #ecfdf5;
+  font-size: 13px;
+}
+
+.auth-sidebar-box .auth-user-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: #ffffff;
+}
+
+.auth-sidebar-box .auth-user-contact {
+  font-size: 11.5px;
+  color: #b7e4c7;
+  margin-top: 2px;
+}
+
+.auth-btn-small {
+  margin-top: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: #52b788;
+  color: #081c15;
+  cursor: pointer;
+}
+
+.auth-btn-small.logout {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(135deg, #081c15 0%, #1b4332 55%, #2d6a4f 100%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+/* Mandatory Login Gate: hide the entire app shell when auth-locked */
+body.auth-locked .shell {
+  display: none !important;
+}
+
+body.auth-locked #authModal {
+  display: flex !important;
+}
+
+.modal-backdrop.show {
+  display: flex;
+}
+
+.auth-modal-card {
+  background: #ffffff;
+  border-radius: 20px;
+  max-width: 480px;
+  width: 100%;
+  padding: 28px 28px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.38);
+  border: 1px solid var(--line);
+  position: relative;
+  margin: auto;
+}
+
+.otp-code-input {
+  font-size: 24px !important;
+  letter-spacing: 8px;
+  text-align: center;
+  font-weight: 800;
+  color: var(--green-dark);
+  padding: 12px !important;
+}
+
+.otp-sim-banner {
+  background: #ecfdf5;
+  border: 2px dashed #52b788;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #081c15;
+}
+
+.otp-sim-code {
+  display: inline-block;
+  background: #1b4332;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 3px;
+  padding: 3px 10px;
+  border-radius: 7px;
+  margin: 4px 6px 4px 0;
+}
+
+.auth-close-btn {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  font-size: 20px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  background: #f1f5f0;
+  padding: 5px;
+  border-radius: 12px;
+  margin: 14px 0 18px;
+}
+
+.auth-tab-btn {
+  background: transparent;
+  color: var(--ink);
+  border: none;
+  padding: 9px 12px;
+  border-radius: 9px;
+  font-weight: 700;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.auth-tab-btn.active {
+  background: var(--green);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(45, 106, 79, 0.22);
+}
+
+.auth-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-or-divider {
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0;
+}
+

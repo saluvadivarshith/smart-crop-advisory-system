@@ -107,3 +107,35 @@ class InputsRecommendRequest(BaseModel):
     crop_result: Optional[dict[str, Any]] = None
     shc_npk: Optional[dict[str, Any]] = None
     prices: Optional[dict[str, Any]] = None
+
+
+class AuthSignupRequest(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=120)
+    email: Optional[str] = Field(default=None, max_length=150)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    password: str = Field(..., min_length=6, max_length=128)
+    preferred_channel: Optional[str] = Field(default=None, description="email or sms")
+
+
+class AuthSigninRequest(BaseModel):
+    identifier: str = Field(..., min_length=3, max_length=150, description="Email address or mobile phone number")
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class AuthCheckRequest(BaseModel):
+    identifier: str = Field(..., min_length=3, max_length=150, description="Email address or mobile phone number")
+
+
+class AuthVerifyOtpRequest(BaseModel):
+    challenge_id: str = Field(..., min_length=6, max_length=120)
+    otp_code: str = Field(..., min_length=4, max_length=12)
+
+
+class AuthResendOtpRequest(BaseModel):
+    challenge_id: str = Field(..., min_length=6, max_length=120)
+
+
+class AuthSenderConfigRequest(BaseModel):
+    smtp_email: Optional[str] = Field(default=None, max_length=150)
+    smtp_app_password: Optional[str] = Field(default=None, max_length=150)
+    fast2sms_api_key: Optional[str] = Field(default=None, max_length=250)

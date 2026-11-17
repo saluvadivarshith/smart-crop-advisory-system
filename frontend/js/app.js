@@ -9,6 +9,8 @@ const API_BASE =
     : "";
 
 const state = {
+  currentUser: null,
+  authToken: null,
   farms: [],
   activeFarm: null,
   cropResult: null,
@@ -174,16 +176,408 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Load backend state
-  await Promise.all([
-    loadModelStatus(),
-    loadSampleGallery(),
-    loadFarms(),
-    loadHistory(),
-  ]);
-
-  updateDashboardView();
+  // Enforce Sign-In gate first on page load
+  await loadCurrentUser();
+  loadModelStatus();
+  loadSampleGallery();
 });
+
+// -------------------------
+// Mandatory Farmer Login Gate & 2-Step Verification (Gmail / SMS OTP)
+// -------------------------
+
+let activeOtpChallengeId = null;
+
+function authHeaders(extra = {}) {
+  const h = { ...extra };
+  if (state.authToken) {
+    h["Authorization"] = `Bearer ${state.authToken}`;
+  }
+  return h;
+}
+
+function syncAuthLockState() {
+  const modal = document.getElementById("authModal");
+  const appShell = document.getElementById("appShell");
+  if (state.currentUser && state.authToken) {
+    document.body.classList.remove("auth-locked");
+    if (appShell) appShell.style.display = "";
+    if (modal) modal.classList.remove("show");
+  } else {
+    document.body.classList.add("auth-locked");
+    if (appShell) appShell.style.display = "none";
+    if (modal) modal.classList.add("show");
+  }
+}
+
+async function loadCurrentUser() {
+  // Always require explicit Sign In on fresh webpage access
+  state.authToken = null;
+  state.currentUser = null;
+  localStorage.removeItem("cropsense_auth_token");
+  syncAuthLockState();
+  renderAuthSidebar();
+}
+
+function renderAuthSidebar() {
+  const box = document.getElementById("authSidebarBox");
+  if (!box) return;
+  if (state.currentUser) {
+    const u = state.currentUser;
+    const contactParts = [u.phone ? `📱 ${u.phone}` : null, u.email ? `✉️ ${u.email}` : null]
+      .filter(Boolean)
+      .join(" · ");
+    box.innerHTML = `
+      <div class="auth-user-name">👨‍🌾 ${escapeHtml(u.full_name)}</div>
+      <div class="auth-user-contact">${escapeHtml(contactParts)}</div>
+      <button class="auth-btn-small logout" onclick="logoutFarmer()">🔒 Sign Out</button>
+    `;
+  } else {
+    box.innerHTML = `
+      <div class="auth-user-name">👤 Not Signed In</div>
+      <div class="auth-user-contact">2-Step Verification Required</div>
+      <button class="auth-btn-small" onclick="openAuthModal('signin')">🔑 Sign In / Sign Up</button>
+    `;
+  }
+}
+
+window.openAuthModal = function (tab = "signin") {
+  const modal = document.getElementById("authModal");
+  if (modal) modal.classList.add("show");
+  backToAuthStep1();
+  switchAuthTab(tab);
+};
+
+window.closeAuthModal = function () {
+  // Never allow closing the modal if the user is not logged in
+  if (!state.currentUser || !state.authToken) {
+    showToast("Please Sign In or Sign Up with 2-Step Verification to access CropSense.");
+    return;
+  }
+  const modal = document.getElementById("authModal");
+  if (modal) modal.classList.remove("show");
+};
+
+window.switchAuthTab = function (tab) {
+  const isSignup = tab === "signup";
+  const tabSignin = document.getElementById("tabBtnSignin");
+  const tabSignup = document.getElementById("tabBtnSignup");
+  const formSignin = document.getElementById("signinForm");
+  const formSignup = document.getElementById("signupForm");
+  const alertBox = document.getElementById("authAlertBox");
+
+  if (tabSignin) tabSignin.classList.toggle("active", !isSignup);
+  if (tabSignup) tabSignup.classList.toggle("active", isSignup);
+  if (formSignin) formSignin.style.display = isSignup ? "none" : "flex";
+  if (formSignup) formSignup.style.display = isSignup ? "flex" : "none";
+  if (alertBox) alertBox.innerHTML = "";
+};
+
+window.backToAuthStep1 = function () {
+  activeOtpChallengeId = null;
+  const s1 = document.getElementById("authStep1Wrap");
+  const s2 = document.getElementById("authStep2Wrap");
+  if (s1) s1.style.display = "block";
+  if (s2) s2.style.display = "none";
+};
+
+function showOtpStep2(challengeData) {
+  activeOtpChallengeId = challengeData.challenge_id;
+  const s1 = document.getElementById("authStep1Wrap");
+  const s2 = document.getElementById("authStep2Wrap");
+  const titleEl = document.getElementById("otpStepTitle");
+  const subEl = document.getElementById("otpStepSub");
+  const alertEl = document.getElementById("otpAlertBox");
+  const simEl = document.getElementById("otpSimulatedInbox");
+  const codeIn = document.getElementById("otpCodeInput");
+
+  if (s1) s1.style.display = "none";
+  if (s2) s2.style.display = "block";
+  if (alertEl) alertEl.innerHTML = "";
+  if (codeIn) {
+    codeIn.value = "";
+    codeIn.focus();
+  }
+
+  const isEmail = challengeData.channel === "email";
+  if (titleEl) {
+    titleEl.textContent = isEmail
+      ? "📧 Step 2: Gmail Verification Code"
+      : "📱 Step 2: Mobile SMS Verification Code";
+  }
+  if (subEl) {
+    subEl.textContent = isEmail
+      ? `Enter the 6-digit verification code sent to your Gmail (${challengeData.destination})`
+      : `Enter the 6-digit SMS verification code sent to +91-${challengeData.destination}`;
+  }
+
+  if (simEl) {
+    if (challengeData.demo_otp_code) {
+      const icon = isEmail ? "📧 Gmail Inbox Notification" : "💬 SMS Message Notification";
+      simEl.innerHTML = `
+        <div class="otp-sim-banner">
+          <div><b>${icon} (${escapeHtml(challengeData.destination)}):</b></div>
+          <div style="margin:6px 0">
+            Your CropSense 2-Step verification code is:
+            <span class="otp-sim-code">${escapeHtml(challengeData.demo_otp_code)}</span>
+            <button type="button" class="secondary" style="padding:4px 10px;font-size:12px" onclick="fillSimulatedOtp('${escapeHtml(challengeData.demo_otp_code)}')">
+              Auto-Fill Code
+            </button>
+          </div>
+          <div class="sub" style="font-size:11px">${escapeHtml(challengeData.delivery_note || "")}</div>
+        </div>
+      `;
+    } else {
+      simEl.innerHTML = `
+        <div class="alert green">
+          <b>Live Code Dispatched:</b> ${escapeHtml(challengeData.delivery_note || "")}
+        </div>
+      `;
+    }
+  }
+}
+
+window.fillSimulatedOtp = function (code) {
+  const el = document.getElementById("otpCodeInput");
+  if (el) el.value = code;
+};
+
+window.prefillAndSwitchAuth = function (targetTab, identifier) {
+  switchAuthTab(targetTab);
+  const val = (identifier || "").trim();
+  if (!val) return;
+  if (targetTab === "signup") {
+    if (val.includes("@")) {
+      document.getElementById("signupEmail").value = val;
+    } else {
+      document.getElementById("signupPhone").value = val;
+    }
+  } else {
+    document.getElementById("signinIdentifier").value = val;
+  }
+};
+
+window.submitSignin = async function (event) {
+  event.preventDefault();
+  const identifier = (document.getElementById("signinIdentifier").value || "").trim();
+  const password = document.getElementById("signinPassword").value || "";
+  const alertBox = document.getElementById("authAlertBox");
+  const btn = document.getElementById("btnSubmitSignin");
+
+  if (btn) btn.disabled = true;
+  if (alertBox) alertBox.innerHTML = "";
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/signin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier, password }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (resp.status === 404) {
+        if (alertBox) {
+          alertBox.innerHTML = `
+            <div class="alert">
+              <b>New User Detected:</b> ${escapeHtml(data.detail)}<br>
+              <button type="button" class="secondary" style="margin-top:8px" onclick="prefillAndSwitchAuth('signup', '${escapeHtml(identifier)}')">
+                🌱 Continue to Sign Up with "${escapeHtml(identifier)}" →
+              </button>
+            </div>
+          `;
+        }
+        return;
+      }
+      throw new Error(data.detail || "Sign in failed");
+    }
+
+    if (data.requires_otp) {
+      showOtpStep2(data);
+      showToast(`Step 1 verified! Enter the 6-digit ${data.channel === "email" ? "Gmail" : "SMS"} verification code.`);
+      return;
+    }
+  } catch (err) {
+    if (alertBox) {
+      alertBox.innerHTML = `<div class="alert red">${escapeHtml(err.message)}</div>`;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
+window.submitSignup = async function (event) {
+  event.preventDefault();
+  const fullName = (document.getElementById("signupName").value || "").trim();
+  const phone = (document.getElementById("signupPhone").value || "").trim() || null;
+  const email = (document.getElementById("signupEmail").value || "").trim() || null;
+  const chSel = (document.getElementById("signupChannel") || {}).value || "auto";
+  const password = document.getElementById("signupPassword").value || "";
+  const alertBox = document.getElementById("authAlertBox");
+  const btn = document.getElementById("btnSubmitSignup");
+
+  if (!phone && !email) {
+    if (alertBox) {
+      alertBox.innerHTML = `<div class="alert red">Please enter either your <b>Mobile Number</b> or your <b>Gmail Address</b> (or both) to create an account.</div>`;
+    }
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  if (alertBox) alertBox.innerHTML = "";
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        full_name: fullName,
+        phone,
+        email,
+        password,
+        preferred_channel: chSel === "auto" ? null : chSel,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (resp.status === 409) {
+        const match = (data.detail || "").match(/'([^']+)'/);
+        const existingId = (match && match[1]) || phone || email || "";
+        if (alertBox) {
+          alertBox.innerHTML = `
+            <div class="alert">
+              <b>Account Already Exists:</b> ${escapeHtml(data.detail)}<br>
+              <button type="button" class="secondary" style="margin-top:8px" onclick="prefillAndSwitchAuth('signin', '${escapeHtml(existingId)}')">
+                🔑 Switch to Sign In with "${escapeHtml(existingId)}" →
+              </button>
+            </div>
+          `;
+        }
+        return;
+      }
+      throw new Error(data.detail || "Sign up failed");
+    }
+
+    if (data.requires_otp) {
+      showOtpStep2(data);
+      showToast(`6-digit verification code sent via ${data.channel === "email" ? "Gmail" : "SMS"}!`);
+      return;
+    }
+  } catch (err) {
+    if (alertBox) {
+      alertBox.innerHTML = `<div class="alert red">${escapeHtml(err.message)}</div>`;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
+window.submitVerifyOtp = async function (event) {
+  event.preventDefault();
+  const otpCode = (document.getElementById("otpCodeInput").value || "").trim();
+  const alertEl = document.getElementById("otpAlertBox");
+  const btn = document.getElementById("btnVerifyOtp");
+
+  if (!activeOtpChallengeId) {
+    backToAuthStep1();
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  if (alertEl) alertEl.innerHTML = "";
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/verify-otp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        challenge_id: activeOtpChallengeId,
+        otp_code: otpCode,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.detail || "Invalid verification code");
+    }
+
+    state.authToken = data.token;
+    state.currentUser = data.user;
+    localStorage.setItem("cropsense_auth_token", data.token);
+    syncAuthLockState();
+    renderAuthSidebar();
+    await loadFarms();
+    await loadHistory();
+    updateDashboardView();
+    showToast(data.message || `2-Step Verification complete! Welcome, ${data.user.full_name}.`);
+  } catch (err) {
+    if (alertEl) {
+      alertEl.innerHTML = `<div class="alert red">${escapeHtml(err.message)}</div>`;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
+window.resendOtpCode = async function () {
+  if (!activeOtpChallengeId) return;
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/resend-otp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ challenge_id: activeOtpChallengeId }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Could not resend code");
+    showOtpStep2(data);
+    showToast("A fresh 6-digit verification code has been sent!");
+  } catch (err) {
+    showToast(err.message);
+  }
+};
+
+window.saveSenderConfig = async function () {
+  const smtpEmail = (document.getElementById("cfgSmtpEmail").value || "").trim();
+  const smtpPass = (document.getElementById("cfgSmtpPass").value || "").trim();
+  const smsKey = (document.getElementById("cfgSmsKey").value || "").trim();
+  const statusEl = document.getElementById("cfgSenderStatus");
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/sender-settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        smtp_email: smtpEmail || null,
+        smtp_app_password: smtpPass || null,
+        fast2sms_api_key: smsKey || null,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error("Failed to save sender config");
+    if (statusEl) {
+      statusEl.textContent = `Saved! Gmail SMTP: ${data.smtp_configured ? "Active (" + data.smtp_email + ")" : "Not set"} · SMS Gateway: ${data.sms_configured ? "Active" : "Simulated"}`;
+    }
+    showToast("Live OTP sender settings updated!");
+  } catch (err) {
+    showToast(err.message);
+  }
+};
+
+window.logoutFarmer = async function () {
+  try {
+    await fetch(`${API_BASE}/api/auth/logout`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+  } catch (e) {
+    // ignore network error on logout
+  }
+  state.authToken = null;
+  state.currentUser = null;
+  localStorage.removeItem("cropsense_auth_token");
+  backToAuthStep1();
+  syncAuthLockState();
+  renderAuthSidebar();
+  showToast("Signed out. Please sign in with 2-Step Verification to continue.");
+};
 
 function renderSoilInputs() {
   const container = document.getElementById("soilFields");
@@ -261,7 +655,7 @@ async function loadModelStatus() {
 
 async function loadFarms() {
   try {
-    const resp = await fetch(`${API_BASE}/api/farms`);
+    const resp = await fetch(`${API_BASE}/api/farms`, { headers: authHeaders() });
     if (!resp.ok) return;
     const data = await resp.json();
     state.farms = data.farms || [];
@@ -636,7 +1030,7 @@ window.saveFarmProfile = async function () {
   try {
     const resp = await fetch(`${API_BASE}/api/farms`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     });
     if (!resp.ok) {

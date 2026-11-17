@@ -362,3 +362,73 @@ def test_new_farm_plan_and_inputs_advisor():
     assert len(inp["shopping_list"]) >= 5
 
 
+def test_farmer_auth_email_and_phone():
+    """Verify 2-Step Verification (OTP) for Sign Up and Sign In via Email and Phone."""
+    from backend.services.auth_service import (
+        AuthError,
+        check_account_exists,
+        get_user_by_token,
+        logout_token,
+        signin_user,
+        signup_user,
+        verify_otp_challenge,
+    )
+
+    # 1. Step 1 Sign Up with both email and phone -> returns 6-digit OTP challenge (email channel)
+    ch1 = signup_user(
+        full_name="Raju Kumar",
+        email="Raju.Farmer@gmail.com",
+        phone="+91 98765 43210",
+        password="secret123",
+    )
+    assert ch1["requires_otp"] is True
+    assert ch1["channel"] == "email"
+    assert ch1["destination"] == "raju.farmer@gmail.com"
+    assert len(ch1["demo_otp_code"]) == 6
+
+    # Step 2: Verify the 6-digit Gmail OTP to create the account & issue session token
+    reg = verify_otp_challenge(ch1["challenge_id"], ch1["demo_otp_code"])
+    assert reg["verified"] is True
+    assert reg["user"]["email"] == "raju.farmer@gmail.com"
+    assert reg["user"]["phone"] == "9876543210"
+    assert get_user_by_token(reg["token"])["full_name"] == "Raju Kumar"
+
+    # 2. Sign in using EMAIL -> triggers 2-Step Gmail OTP
+    s_email = signin_user("raju.farmer@gmail.com", "secret123")
+    assert s_email["requires_otp"] is True
+    assert s_email["channel"] == "email"
+    login_email = verify_otp_challenge(s_email["challenge_id"], s_email["demo_otp_code"])
+    assert login_email["user"]["id"] == reg["user"]["id"]
+
+    # 3. Sign in using PHONE NUMBER -> triggers 2-Step SMS OTP
+    s_phone = signin_user("9876543210", "secret123")
+    assert s_phone["requires_otp"] is True
+    assert s_phone["channel"] == "sms"
+    login_phone = verify_otp_challenge(s_phone["challenge_id"], s_phone["demo_otp_code"])
+    assert login_phone["user"]["id"] == reg["user"]["id"]
+
+    # 4. Check account existence helper
+    assert check_account_exists("9876543210")["exists"] is True
+    assert check_account_exists("9999900000")["exists"] is False
+
+    # 5. Sign up a phone-only user -> triggers SMS OTP
+    ch_phone = signup_user(
+        full_name="Lakshmi Devi",
+        phone="9123456789",
+        password="password123",
+    )
+    assert ch_phone["channel"] == "sms"
+    reg_phone_only = verify_otp_challenge(ch_phone["challenge_id"], ch_phone["demo_otp_code"])
+    assert reg_phone_only["user"]["email"] is None
+
+    # 6. Non-existent user raises 404 AuthError (prompts UI to switch to Sign Up)
+    with pytest.raises(AuthError) as exc_404:
+        signin_user("newfarmer@gmail.com", "secret123")
+    assert exc_404.value.status_code == 404
+
+    # 7. Logout invalidates token
+    assert logout_token(reg["token"]) is True
+    assert get_user_by_token(reg["token"]) is None
+
+
+

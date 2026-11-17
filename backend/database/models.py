@@ -9,7 +9,7 @@ from typing import Any, Optional
 from backend.database.database import get_connection
 
 FARM_FIELDS = [
-    "farm_name", "village", "district", "state",
+    "user_id", "farm_name", "village", "district", "state",
     "latitude", "longitude", "crop_name", "area_acres",
     "plot_length_m", "plot_width_m", "boundary_geojson", "sowing_date",
 ]
@@ -51,9 +51,15 @@ def create_farm(farm: dict) -> dict:
     return get_farm(farm_id)
 
 
-def list_farms() -> list[dict]:
+def list_farms(user_id: Optional[int] = None) -> list[dict]:
     with get_connection() as conn:
-        rows = conn.execute("SELECT * FROM farms ORDER BY id DESC").fetchall()
+        if user_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM farms WHERE user_id = ? OR user_id IS NULL ORDER BY id DESC",
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM farms ORDER BY id DESC").fetchall()
     return [_row_to_dict(r) for r in rows]
 
 

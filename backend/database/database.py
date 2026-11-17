@@ -17,8 +17,42 @@ DB_PATH = Path(os.environ.get("CROP_ADVISORY_DB", BACKEND_DIR / "data" / "crop_a
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name         TEXT    NOT NULL,
+    email             TEXT    UNIQUE,
+    phone             TEXT    UNIQUE,
+    password_hash     TEXT    NOT NULL,
+    created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    token             TEXT    PRIMARY KEY,
+    user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+    expires_at        TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS otp_challenges (
+    challenge_id      TEXT    PRIMARY KEY,
+    flow_type         TEXT    NOT NULL,
+    channel           TEXT    NOT NULL,
+    destination       TEXT    NOT NULL,
+    otp_hash          TEXT    NOT NULL,
+    payload_json      TEXT    NOT NULL,
+    attempts          INTEGER NOT NULL DEFAULT 0,
+    expires_at        TEXT    NOT NULL,
+    created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key               TEXT    PRIMARY KEY,
+    value             TEXT    NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS farms (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           INTEGER REFERENCES users(id) ON DELETE CASCADE,
     farm_name         TEXT    NOT NULL,
     village           TEXT,
     district          TEXT,
@@ -36,6 +70,7 @@ CREATE TABLE IF NOT EXISTS farms (
 
 CREATE TABLE IF NOT EXISTS assessments (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           INTEGER REFERENCES users(id) ON DELETE CASCADE,
     farm_id           INTEGER REFERENCES farms(id) ON DELETE SET NULL,
     crop_name         TEXT    NOT NULL,
     growth_stage      TEXT,
@@ -71,13 +106,21 @@ def init_db() -> None:
             row["name"] for row in conn.execute("PRAGMA table_info(farms)").fetchall()
         }
         migrations = [
+            ("user_id", "INTEGER"),
             ("plot_length_m", "REAL"),
             ("plot_width_m", "REAL"),
             ("boundary_geojson", "TEXT"),
+            ("sowing_date", "TEXT"),
         ]
         for col_name, col_type in migrations:
             if col_name not in existing_cols:
                 conn.execute(f"ALTER TABLE farms ADD COLUMN {col_name} {col_type}")
+
+        assess_cols = {
+            row["name"] for row in conn.execute("PRAGMA table_info(assessments)").fetchall()
+        }
+        if "user_id" not in assess_cols:
+            conn.execute("ALTER TABLE assessments ADD COLUMN user_id INTEGER")
 
 
 @contextmanager

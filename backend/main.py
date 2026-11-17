@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.database.database import init_db
@@ -25,6 +26,12 @@ from backend.database.models import (
 from backend.knowledge.crops import CROP_PROFILES, GROWTH_STAGES
 from backend.schemas import (
     AdvisoryRequest,
+    AuthCheckRequest,
+    AuthResendOtpRequest,
+    AuthSenderConfigRequest,
+    AuthSigninRequest,
+    AuthSignupRequest,
+    AuthVerifyOtpRequest,
     CalendarRequest,
     FarmCreate,
     InputsRecommendRequest,
@@ -34,6 +41,18 @@ from backend.schemas import (
     SoilTextParseRequest,
 )
 from backend.services.advisory_service import generate_advisory
+from backend.services.auth_service import (
+    AuthError,
+    check_account_exists,
+    get_sender_settings,
+    get_user_by_token,
+    logout_token,
+    resend_otp_challenge,
+    save_sender_settings,
+    signin_user,
+    signup_user,
+    verify_otp_challenge,
+)
 from backend.services.calendar_service import get_crop_calendar, parse_soil_card_text
 from backend.services.crop_service import (
     analyze_crop_image,
@@ -74,6 +93,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def no_cache_frontend(request, call_next):
+    if request.url.path == "/" and "text/html" in request.headers.get("accept", ""):
+        return RedirectResponse(url="/app/")
+    response = await call_next(request)
+    if request.url.path.startswith("/app"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
 
 # -------------------------
@@ -154,18 +183,112 @@ def location_reverse(
 
 
 # -------------------------
+# Farmer Authentication API (Email & Phone Sign-Up / Sign-In)
+# -------------------------
+
+@app.post("/api/auth/check")
+def api_auth_check(req: AuthCheckRequest):
+    try:
+        return check_account_exists(req.identifier)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/auth/signup", status_code=201)
+def api_auth_signup(req: AuthSignupRequest):
+    try:
+        return signup_user(
+            full_name=req.full_name,
+            password=req.password,
+            email=req.email,
+            phone=req.phone,
+            preferred_channel=req.preferred_channel,
+            require_otp=True,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/auth/signin")
+def api_auth_signin(req: AuthSigninRequest):
+    try:
+        return signin_user(identifier=req.identifier, password=req.password, require_otp=True)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/auth/verify-otp")
+def api_auth_verify_otp(req: AuthVerifyOtpRequest):
+    try:
+        return verify_otp_challenge(challenge_id=req.challenge_id, otp_code=req.otp_code)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/auth/resend-otp")
+def api_auth_resend_otp(req: AuthResendOtpRequest):
+    try:
+        return resend_otp_challenge(challenge_id=req.challenge_id)
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.get("/api/auth/sender-settings")
+def api_get_sender_settings():
+    info = get_sender_settings()
+    return {
+        "smtp_email": info["smtp_email"],
+        "smtp_configured": info["smtp_configured"],
+        "sms_configured": info["sms_configured"],
+    }
+
+
+@app.post("/api/auth/sender-settings")
+def api_save_sender_settings(req: AuthSenderConfigRequest):
+    return save_sender_settings(
+        smtp_email=req.smtp_email,
+        smtp_app_password=req.smtp_app_password,
+        fast2sms_api_key=req.fast2sms_api_key,
+    )
+
+
+@app.get("/api/auth/me")
+def api_auth_me(authorization: Optional[str] = Header(default=None)):
+    user = get_user_by_token(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not signed in or session expired.")
+    return {"authenticated": True, "user": user}
+
+
+@app.post("/api/auth/logout")
+def api_auth_logout(authorization: Optional[str] = Header(default=None)):
+    logout_token(authorization)
+    return {"logged_out": True}
+
+
+# -------------------------
 # Farm Profile CRUD API
 # -------------------------
 
 @app.get("/api/farms")
-def api_list_farms():
-    farms = list_farms()
+def api_list_farms(authorization: Optional[str] = Header(default=None)):
+    user = get_user_by_token(authorization)
+    farms = list_farms(user_id=user["id"] if user else None)
     return {"count": len(farms), "farms": farms}
 
 
 @app.post("/api/farms", status_code=201)
-def api_create_farm(farm: FarmCreate):
-    return create_farm(farm.model_dump())
+def api_create_farm(farm: FarmCreate, authorization: Optional[str] = Header(default=None)):
+    user = get_user_by_token(authorization)
+    payload = farm.model_dump()
+    payload["user_id"] = user["id"] if user else None
+    return create_farm(payload)
 
 
 @app.get("/api/farms/{farm_id}")

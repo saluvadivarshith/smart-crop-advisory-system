@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: smart-crop-advisory-system
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: CROP_ADVISORY_DB
+        value: /tmp/crop_advisory.db

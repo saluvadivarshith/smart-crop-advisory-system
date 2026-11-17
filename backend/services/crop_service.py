@@ -27,6 +27,15 @@ MIN_MARGIN_THRESHOLD = 0.12
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
 PLANTVILLAGE_COLOR_DIR = WORKSPACE_ROOT / "plantvillage dataset" / "color"
+BUNDLED_SAMPLES_DIR = WORKSPACE_ROOT / "backend" / "ml" / "sample_leaves"
+
+
+def _get_samples_root() -> Optional[Path]:
+    if PLANTVILLAGE_COLOR_DIR.is_dir():
+        return PLANTVILLAGE_COLOR_DIR
+    if BUNDLED_SAMPLES_DIR.is_dir():
+        return BUNDLED_SAMPLES_DIR
+    return None
 
 # Curated showcase classes from PlantVillage for the 1-Click Sample Gallery
 SHOWCASE_SAMPLE_FOLDERS = [
@@ -115,7 +124,8 @@ def _first_image_in(folder: Path) -> Optional[Path]:
 
 def get_sample_leaf_gallery() -> list[dict]:
     """Return a list of real PlantVillage sample leaf cards with compact thumbnails."""
-    if not PLANTVILLAGE_COLOR_DIR.is_dir():
+    samples_root = _get_samples_root()
+    if not samples_root:
         return []
 
     supported_classes = set()
@@ -129,7 +139,7 @@ def get_sample_leaf_gallery() -> list[dict]:
     for folder_name in SHOWCASE_SAMPLE_FOLDERS:
         if supported_classes and folder_name not in supported_classes:
             continue
-        folder_path = PLANTVILLAGE_COLOR_DIR / folder_name
+        folder_path = samples_root / folder_name
         img_path = _first_image_in(folder_path)
         if not img_path:
             continue
@@ -157,10 +167,11 @@ def get_sample_leaf_gallery() -> list[dict]:
 def analyze_sample_leaf(class_folder: str) -> dict:
     """Run full ML + Grad-CAM analysis on a sample leaf from PlantVillage."""
     safe_name = Path(class_folder).name
-    folder_path = PLANTVILLAGE_COLOR_DIR / safe_name
+    samples_root = _get_samples_root() or BUNDLED_SAMPLES_DIR
+    folder_path = samples_root / safe_name
     img_path = _first_image_in(folder_path)
     if not img_path:
-        raise ValidationError(f"Sample class '{safe_name}' was not found in plantvillage dataset.")
+        raise ValidationError(f"Sample class '{safe_name}' was not found in dataset or bundled samples.")
     info = parse_class_name(safe_name)
     data = img_path.read_bytes()
     return analyze_crop_image(

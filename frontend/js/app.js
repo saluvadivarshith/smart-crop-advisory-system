@@ -3,7 +3,10 @@
  * Connects all UI screens to the FastAPI backend without any hardcoded fake metrics.
  */
 
-const API_BASE = window.location.port === "8000" ? "" : "http://127.0.0.1:8000";
+const API_BASE =
+  window.location.protocol === "file:" || window.location.port === "5500" || window.location.port === "5501"
+    ? "http://127.0.0.1:8000"
+    : "";
 
 const state = {
   farms: [],

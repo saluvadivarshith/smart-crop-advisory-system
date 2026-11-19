@@ -232,9 +232,8 @@ def _deliver_otp(channel: str, destination: str, otp_code: str, full_name: str) 
             "channel": "email",
             "destination": destination,
             "delivery_note": (
-                f"2-Step Gmail Verification triggered for {destination}. "
-                "(Tip: Click 'Configure Real Gmail / SMS Sender' below to send live emails via your Gmail App Password, "
-                "or use the simulated Gmail OTP notification shown here.)"
+                f"6-digit Email verification code generated for {destination} "
+                "(local preview shown below while SMTP is not configured)."
             ),
             "demo_otp_code": otp_code,
         }
@@ -271,8 +270,8 @@ def _deliver_otp(channel: str, destination: str, otp_code: str, full_name: str) 
         "channel": "sms",
         "destination": destination,
         "delivery_note": (
-            f"2-Step SMS Verification triggered for +91-{destination}. "
-            "(Simulated SMS notification shown below — add a Fast2SMS key in Sender Settings for live carrier SMS.)"
+            f"6-digit SMS verification code generated for +91-{destination} "
+            "(preview shown below while SMS gateway key is not configured)."
         ),
         "demo_otp_code": otp_code,
     }
@@ -610,3 +609,343 @@ def logout_token(token: Optional[str]) -> bool:
     with get_connection() as conn:
         cur = conn.execute("DELETE FROM auth_sessions WHERE token = ?", (clean_tok,))
         return cur.rowcount > 0
+
+
+# ------------------------------------------------------------------
+# Pre-Password Phone Verification Flow (New User: Phone -> OTP -> Password)
+# ------------------------------------------------------------------
+
+def start_phone_pre_password_otp(phone: str, full_name: Optional[str] = None) -> dict:
+    """
+    Step 1 for a phone-number user BEFORE asking for password:
+    normalizes phone, checks whether user exists, and issues a 6-digit SMS OTP.
+    """
+    norm_phone = normalize_phone(phone)
+    with get_connection() as conn:
+        existing = conn.execute("SELECT id, full_name FROM users WHERE phone = ?", (norm_phone,)).fetchone()
+    if existing:
+        return _issue_otp_challenge(
+            flow_type="phone_signin",
+            channel="sms",
+            destination=norm_phone,
+            payload={"user_id": existing["id"], "full_name": existing["full_name"], "phone": norm_phone},
+            full_name=existing["full_name"],
+        )
+    name = (full_name or "").strip()
+    return _issue_otp_challenge(
+        flow_type="phone_pre_signup",
+        channel="sms",
+        destination=norm_phone,
+        payload={"full_name": name, "phone": norm_phone},
+        full_name=name or "Farmer",
+    )
+
+
+def verify_phone_pre_password_otp(challenge_id: str, otp_code: str) -> dict:
+    """
+    Step 2 for phone flow: verifies the 6-digit SMS OTP.
+    - If existing user (`phone_signin`): logs in immediately.
+    - If new user (`phone_pre_signup`): returns a short-lived `verification_token`
+      so Step 3 can prompt the user to set their password!
+    """
+    clean_code = re.sub(r"\D", "", otp_code or "")
+    if len(clean_code) != 6:
+        raise ValidationError("Please enter the 6-digit verification code.")
+
+    with get_connection() as conn:
+        ch = conn.execute(
+            "SELECT * FROM otp_challenges WHERE challenge_id = ?",
+            ((challenge_id or "").strip(),),
+        ).fetchone()
+        if not ch:
+            raise AuthError("Verification session not found or already used. Please request a new code.", 400)
+
+        if ch["attempts"] >= MAX_OTP_ATTEMPTS:
+            conn.execute("DELETE FROM otp_challenges WHERE challenge_id = ?", (ch["challenge_id"],))
+            raise AuthError("Too many incorrect attempts. Please start again.", 429)
+
+        if not hmac.compare_digest(_hash_otp(clean_code, ch["challenge_id"]), ch["otp_hash"]):
+            conn.execute(
+                "UPDATE otp_challenges SET attempts = attempts + 1 WHERE challenge_id = ?",
+                (ch["challenge_id"],),
+            )
+            remaining = max(0, MAX_OTP_ATTEMPTS - (ch["attempts"] + 1))
+            raise AuthError(f"Invalid 6-digit verification code ({remaining} attempts remaining).", 401)
+
+        payload = json.loads(ch["payload_json"])
+        flow_type = ch["flow_type"]
+        conn.execute("DELETE FROM otp_challenges WHERE challenge_id = ?", (ch["challenge_id"],))
+
+        if flow_type == "phone_pre_signup":
+            v_token = secrets.token_urlsafe(24)
+            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+            conn.execute(
+                """
+                INSERT INTO otp_challenges
+                    (challenge_id, flow_type, channel, destination, otp_hash, payload_json, attempts, expires_at)
+                VALUES (?, 'phone_set_password', 'sms', ?, 'verified', ?, 0, ?)
+                """,
+                (v_token, ch["destination"], json.dumps(payload), expires_at),
+            )
+            return {
+                "verified": True,
+                "needs_password": True,
+                "verification_token": v_token,
+                "phone": payload["phone"],
+                "full_name": payload["full_name"],
+                "message": "Mobile number verified! Now create a password for your account.",
+            }
+
+        user_id = int(payload["user_id"])
+        user_row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        token = _create_session(conn, user_id)
+        return {
+            "verified": True,
+            "needs_password": False,
+            "token": token,
+            "user": _user_dict(user_row),
+            "message": f"Welcome back, {user_row['full_name']}!",
+        }
+
+
+def complete_phone_signup_with_password(
+    verification_token: str,
+    password: str,
+    full_name: Optional[str] = None,
+) -> dict:
+    """Step 3 for new phone user: set password after SMS verification & issue session."""
+    pw_hash = _hash_password(password)
+    with get_connection() as conn:
+        ch = conn.execute(
+            "SELECT * FROM otp_challenges WHERE challenge_id = ? AND flow_type = 'phone_set_password'",
+            ((verification_token or "").strip(),),
+        ).fetchone()
+        if not ch:
+            raise AuthError("Verification expired. Please verify your mobile number again.", 400)
+        payload = json.loads(ch["payload_json"])
+        final_name = (full_name or payload.get("full_name") or "").strip()
+        if len(final_name) < 2:
+            raise ValidationError("Please enter your name (at least 2 characters).")
+        conn.execute("DELETE FROM otp_challenges WHERE challenge_id = ?", (ch["challenge_id"],))
+
+        cur = conn.execute(
+            "INSERT INTO users (full_name, email, phone, password_hash) VALUES (?, NULL, ?, ?)",
+            (final_name, payload["phone"], pw_hash),
+        )
+        user_id = cur.lastrowid
+        user_row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        token = _create_session(conn, user_id)
+
+    return {
+        "verified": True,
+        "token": token,
+        "user": _user_dict(user_row),
+        "message": f"Account created! Welcome, {user_row['full_name']}.",
+    }
+
+
+def start_pre_password_otp(identifier: str, full_name: Optional[str] = None) -> dict:
+    """
+    Unified Step 1 for Email OR 10-digit Mobile Number BEFORE asking for a password.
+    Checks if the user exists in local SQLite and issues a 6-digit Email or SMS OTP.
+    """
+    raw = (identifier or "").strip()
+    if "@" in raw:
+        norm_val = normalize_email(raw)
+        channel = "email"
+        col = "email"
+    else:
+        norm_val = normalize_phone(raw)
+        channel = "sms"
+        col = "phone"
+
+    with get_connection() as conn:
+        existing = conn.execute(
+            f"SELECT id, full_name FROM users WHERE {col} = ?",
+            (norm_val,),
+        ).fetchone()
+
+    if existing:
+        return _issue_otp_challenge(
+            flow_type="local_otp_signin",
+            channel=channel,
+            destination=norm_val,
+            payload={"user_id": existing["id"], "full_name": existing["full_name"], col: norm_val},
+            full_name=existing["full_name"],
+        )
+
+    name = (full_name or "").strip()
+    return _issue_otp_challenge(
+        flow_type="local_pre_signup",
+        channel=channel,
+        destination=norm_val,
+        payload={
+            "full_name": name,
+            "email": norm_val if channel == "email" else None,
+            "phone": norm_val if channel == "sms" else None,
+        },
+        full_name=name or "Farmer",
+    )
+
+
+def verify_pre_password_otp(challenge_id: str, otp_code: str) -> dict:
+    """
+    Unified Step 2: verifies the 6-digit Email or SMS OTP.
+    - Existing user: logs in immediately.
+    - New user: returns `needs_password: True` + short-lived `verification_token` for Step 3.
+    """
+    clean_code = re.sub(r"\D", "", otp_code or "")
+    if len(clean_code) != 6:
+        raise ValidationError("Please enter the 6-digit verification code.")
+
+    with get_connection() as conn:
+        ch = conn.execute(
+            "SELECT * FROM otp_challenges WHERE challenge_id = ?",
+            ((challenge_id or "").strip(),),
+        ).fetchone()
+        if not ch:
+            raise AuthError("Verification session not found or already used. Please request a new code.", 400)
+
+        if ch["attempts"] >= MAX_OTP_ATTEMPTS:
+            conn.execute("DELETE FROM otp_challenges WHERE challenge_id = ?", (ch["challenge_id"],))
+            raise AuthError("Too many incorrect attempts. Please start again.", 429)
+
+        if not hmac.compare_digest(_hash_otp(clean_code, ch["challenge_id"]), ch["otp_hash"]):
+            conn.execute(
+                "UPDATE otp_challenges SET attempts = attempts + 1 WHERE challenge_id = ?",
+                (ch["challenge_id"],),
+            )
+            remaining = max(0, MAX_OTP_ATTEMPTS - (ch["attempts"] + 1))
+            raise AuthError(f"Invalid 6-digit verification code ({remaining} attempts remaining).", 401)
+
+        payload = json.loads(ch["payload_json"])
+        flow_type = ch["flow_type"]
+        channel = ch["channel"]
+        destination = ch["destination"]
+        conn.execute("DELETE FROM otp_challenges WHERE challenge_id = ?", (ch["challenge_id"],))
+
+        if flow_type in ("local_pre_signup", "phone_pre_signup"):
+            v_token = secrets.token_urlsafe(24)
+            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+            conn.execute(
+                """
+                INSERT INTO otp_challenges
+                    (challenge_id, flow_type, channel, destination, otp_hash, payload_json, attempts, expires_at)
+                VALUES (?, 'local_set_password', ?, ?, 'verified', ?, 0, ?)
+                """,
+                (v_token, channel, destination, json.dumps(payload), expires_at),
+            )
+            return {
+                "verified": True,
+                "needs_password": True,
+                "verification_token": v_token,
+                "channel": channel,
+                "destination": destination,
+                "phone": payload.get("phone"),
+                "email": payload.get("email"),
+                "full_name": payload.get("full_name", ""),
+                "message": "Verified! Now create a password for your CropSense account.",
+            }
+
+        user_id = int(payload["user_id"])
+        user_row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        token = _create_session(conn, user_id)
+        return {
+            "verified": True,
+            "needs_password": False,
+            "token": token,
+            "user": _user_dict(user_row),
+            "message": f"Welcome back, {user_row['full_name']}!",
+        }
+
+
+def complete_pre_password_signup(
+    verification_token: str,
+    password: str,
+    full_name: Optional[str] = None,
+) -> dict:
+    """Unified Step 3 for new email or phone user: set password after OTP verification & issue session."""
+    pw_hash = _hash_password(password)
+    with get_connection() as conn:
+        ch = conn.execute(
+            "SELECT * FROM otp_challenges WHERE challenge_id = ? AND flow_type IN ('local_set_password', 'phone_set_password')",
+            ((verification_token or "").strip(),),
+        ).fetchone()
+        if not ch:
+            raise AuthError("Verification expired. Please verify your email or mobile number again.", 400)
+        payload = json.loads(ch["payload_json"])
+        final_name = (full_name or payload.get("full_name") or "").strip()
+        if len(final_name) < 2:
+            raise ValidationError("Please enter your name (at least 2 characters).")
+        conn.execute("DELETE FROM otp_challenges WHERE challenge_id = ?", (ch["challenge_id"],))
+
+        cur = conn.execute(
+            "INSERT INTO users (full_name, email, phone, password_hash) VALUES (?, ?, ?, ?)",
+            (final_name, payload.get("email"), payload.get("phone"), pw_hash),
+        )
+        user_id = cur.lastrowid
+        user_row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        token = _create_session(conn, user_id)
+
+    return {
+        "verified": True,
+        "token": token,
+        "user": _user_dict(user_row),
+        "message": f"Account created! Welcome, {user_row['full_name']}.",
+    }
+
+
+def signin_with_google_id_token(credential: str, expected_client_id: Optional[str] = None) -> dict:
+    """
+    Verify a Google Identity Services ID token via Google's official tokeninfo API
+    and sign in (or create) the verified user in CropSense.
+    """
+    raw_cred = (credential or "").strip()
+    if not raw_cred:
+        raise ValidationError("Google ID token is required.")
+
+    try:
+        resp = requests.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": raw_cred},
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        raise AuthError(f"Could not reach Google Auth API: {exc}", 503) from exc
+
+    if resp.status_code != 200:
+        raise AuthError("Invalid or expired Google Sign-In token. Please try again.", 401)
+
+    info = resp.json()
+    if expected_client_id and info.get("aud") != expected_client_id:
+        raise AuthError("Google token audience mismatch.", 401)
+
+    email = (info.get("email") or "").strip().lower()
+    email_verified = str(info.get("email_verified", "")).lower() == "true"
+    if not email or not email_verified:
+        raise AuthError("Google account email is not verified.", 401)
+
+    full_name = (info.get("name") or email.split("@")[0]).strip()
+    with get_connection() as conn:
+        existing = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        if existing:
+            user_row = existing
+            user_id = existing["id"]
+        else:
+            # Random unusable password hash for Google-authenticated accounts
+            pw_hash = _hash_password(secrets.token_urlsafe(24))
+            cur = conn.execute(
+                "INSERT INTO users (full_name, email, phone, password_hash) VALUES (?, ?, NULL, ?)",
+                (full_name, email, pw_hash),
+            )
+            user_id = cur.lastrowid
+            user_row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        token = _create_session(conn, user_id)
+
+    return {
+        "verified": True,
+        "provider": "google",
+        "token": token,
+        "user": _user_dict(user_row),
+        "message": f"Signed in with Google! Welcome, {user_row['full_name']}.",
+    }

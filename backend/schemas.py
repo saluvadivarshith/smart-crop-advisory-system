@@ -56,9 +56,13 @@ class FarmCreate(BaseModel):
 class AdvisoryRequest(BaseModel):
     """
     Request payload for the integrated risk & advisory engine.
-    Accepts pre-computed results or raw soil/coordinates, and optionally saves to SQLite.
+    Accepts pre-computed results or raw soil/coordinates, and optionally saves to database.
     """
-    farm_id: Optional[int] = None
+    farm_id: Optional[str | int] = None
+    farm_name: Optional[str] = Field(default=None, max_length=120)
+    village: Optional[str] = Field(default=None, max_length=120)
+    district: Optional[str] = Field(default=None, max_length=120)
+    state: Optional[str] = Field(default=None, max_length=120)
     crop_name: str = Field(default="Tomato", min_length=1, max_length=80)
     growth_stage: Optional[str] = Field(default="vegetative", max_length=40)
     sowing_date: Optional[str] = Field(default=None, max_length=32)
@@ -139,3 +143,39 @@ class AuthSenderConfigRequest(BaseModel):
     smtp_email: Optional[str] = Field(default=None, max_length=150)
     smtp_app_password: Optional[str] = Field(default=None, max_length=150)
     fast2sms_api_key: Optional[str] = Field(default=None, max_length=250)
+
+
+class PhoneStartOtpRequest(BaseModel):
+    phone: str = Field(..., min_length=10, max_length=30)
+    full_name: Optional[str] = Field(default=None, max_length=120)
+
+
+class PrePasswordOtpStartRequest(BaseModel):
+    identifier: str = Field(..., min_length=5, max_length=150)
+    full_name: Optional[str] = Field(default=None, max_length=120)
+
+
+class PhoneCompleteSignupRequest(BaseModel):
+    verification_token: str = Field(..., min_length=8, max_length=160)
+    password: str = Field(..., min_length=6, max_length=128)
+    full_name: Optional[str] = Field(default=None, max_length=120)
+
+
+class GoogleIdTokenRequest(BaseModel):
+    credential: str = Field(..., min_length=20, max_length=4096)
+
+
+class CropAdvisoryCreate(BaseModel):
+    farm_name: str = Field(..., min_length=1, max_length=120)
+    village: str = Field(default="Unknown", max_length=120)
+    district: str = Field(default="Unknown", max_length=120)
+    state: str = Field(default="Unknown", max_length=120)
+    crop_name: str = Field(..., min_length=1, max_length=80)
+    growth_stage: str = Field(default="vegetative", max_length=40)
+    area_acres: float = Field(default=1.0, ge=0.01, le=10000)
+    predicted_disease: Optional[str] = None
+    model_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    soil_score: Optional[int] = Field(default=None, ge=0, le=100)
+    risk_score: Optional[int] = Field(default=None, ge=0, le=100)
+    risk_level: str = Field(default="LOW", pattern="^(LOW|MODERATE|HIGH)$")
+    recommended_action: str = Field(..., min_length=2, max_length=2000)

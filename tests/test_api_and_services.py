@@ -15,10 +15,11 @@ from PIL import Image, ImageDraw
 from pydantic import ValidationError as PydanticValidationError
 from starlette.datastructures import Headers
 
-# Use an isolated temporary SQLite database for tests
+# Use an isolated temporary SQLite database for offline unit tests
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ["CROP_ADVISORY_DB"] = _tmp_db.name
+os.environ["INSFORGE_USE_LOCAL_SQLITE"] = "1"
 
 from backend.database.database import init_db
 from backend.main import (
@@ -429,6 +430,79 @@ def test_farmer_auth_email_and_phone():
     # 7. Logout invalidates token
     assert logout_token(reg["token"]) is True
     assert get_user_by_token(reg["token"]) is None
+
+
+def test_pre_password_phone_verification_and_user_isolation():
+    """Verify new user phone flow authenticates via SMS OTP BEFORE asking for password, plus per-user isolation."""
+    from backend.main import api_insforge_public_config
+    from backend.services.auth_service import (
+        complete_phone_signup_with_password,
+        start_phone_pre_password_otp,
+        verify_phone_pre_password_otp,
+    )
+
+    # 1. Brand-new phone user starting from Log In (no name or password yet) -> receives 6-digit SMS OTP
+    ch = start_phone_pre_password_otp("9848012345")
+    assert ch["requires_otp"] is True
+    assert ch["channel"] == "sms"
+    assert len(ch["demo_otp_code"]) == 6
+
+    # 2. Verify SMS OTP -> returns needs_password=True + verification_token
+    step2 = verify_phone_pre_password_otp(ch["challenge_id"], ch["demo_otp_code"])
+    assert step2["verified"] is True
+    assert step2["needs_password"] is True
+    assert step2["verification_token"]
+
+    # 3. Complete account with name + password after phone is verified
+    user_a = complete_phone_signup_with_password(
+        step2["verification_token"],
+        "securePass1",
+        full_name="Suresh Reddy",
+    )
+    assert user_a["verified"] is True
+    assert user_a["user"]["full_name"] == "Suresh Reddy"
+    token_a = f"Bearer {user_a['token']}"
+
+    # 4. Create a second user (User B) via pre-password flow with name supplied upfront
+    ch_b = start_phone_pre_password_otp("9848099999", full_name="Anita Rao")
+    step2_b = verify_phone_pre_password_otp(ch_b["challenge_id"], ch_b["demo_otp_code"])
+    user_b = complete_phone_signup_with_password(step2_b["verification_token"], "securePass2")
+    token_b = f"Bearer {user_b['token']}"
+
+    # 5. User A creates a farm -> User A can see it, User B CANNOT see or delete it!
+    farm_a = api_create_farm(
+        FarmCreate(
+            farm_name="Suresh North Plot",
+            village="Warangal",
+            latitude=17.9689,
+            longitude=79.5941,
+            crop_name="Tomato",
+        ),
+        authorization=token_a,
+    )
+    list_a = api_list_farms(authorization=token_a)
+    list_b = api_list_farms(authorization=token_b)
+    assert any(f["id"] == farm_a["id"] for f in list_a["farms"])
+    assert not any(f["id"] == farm_a["id"] for f in list_b["farms"])
+
+    with pytest.raises(HTTPException) as del_exc:
+        api_delete_farm(str(farm_a["id"]), authorization=token_b)
+    assert del_exc.value.status_code == 404
+
+    assert api_delete_farm(str(farm_a["id"]), authorization=token_a)["deleted"] is True
+
+    # 6. Verify 401 enforcement when InsForge mode is active without a Bearer token
+    prev_flag = os.environ.pop("INSFORGE_USE_LOCAL_SQLITE", None)
+    try:
+        cfg = api_insforge_public_config()
+        if cfg["configured"]:
+            with pytest.raises(HTTPException) as exc_401:
+                api_list_farms(authorization=None)
+            assert exc_401.value.status_code == 401
+    finally:
+        if prev_flag is not None:
+            os.environ["INSFORGE_USE_LOCAL_SQLITE"] = prev_flag
+
 
 
 

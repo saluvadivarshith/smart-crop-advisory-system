@@ -11,6 +11,8 @@ const API_BASE =
 const state = {
   currentUser: null,
   authToken: null,
+  authProvider: null, // "supabase" | "local_phone" | null
+  supabaseConfig: null,
   farms: [],
   activeFarm: null,
   cropResult: null,
@@ -176,17 +178,176 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Enforce Sign-In gate first on page load
-  await loadCurrentUser();
+  // Initialize InsForge Auth SDK & enforce Sign-In gate first on page load
+  await initAuthPortal();
   loadModelStatus();
   loadSampleGallery();
 });
 
 // -------------------------
-// Mandatory Farmer Login Gate & 2-Step Verification (Gmail / SMS OTP)
+// Mandatory Split-Screen Farmer Auth Portal (InsForge Auth + Google OAuth + Pre-Password Verification)
 // -------------------------
 
-let activeOtpChallengeId = null;
+const AUTH_HERO_SLIDES = [
+  "Growing Smarter,\nHarvesting Better",
+  "Detect Leaf Disease,\nProtect Every Acre",
+  "Soil, Weather & AI\nin One Portal",
+];
+let authHeroSlideIdx = 0;
+let authHeroTimer = null;
+let loginUsePassword = false;
+let otpContext = null;
+let setPasswordContext = null;
+
+function formatShortId(id) {
+  if (id === null || id === undefined) return "#—";
+  const s = String(id);
+  return s.length > 10 ? `#${s.slice(0, 8)}` : `#${s}`;
+}
+
+window.setAuthHeroSlide = function (idx) {
+  authHeroSlideIdx = ((idx % AUTH_HERO_SLIDES.length) + AUTH_HERO_SLIDES.length) % AUTH_HERO_SLIDES.length;
+  const tagEl = document.getElementById("authHeroTagline");
+  if (tagEl) tagEl.textContent = AUTH_HERO_SLIDES[authHeroSlideIdx];
+  document.querySelectorAll(".auth-hero-dot").forEach((dot) => {
+    dot.classList.toggle("active", Number(dot.dataset.slide) === authHeroSlideIdx);
+  });
+};
+
+function startAuthHeroCarousel() {
+  if (authHeroTimer) clearInterval(authHeroTimer);
+  authHeroTimer = setInterval(() => {
+    if (document.body.classList.contains("auth-locked")) {
+      window.setAuthHeroSlide(authHeroSlideIdx + 1);
+    }
+  }, 5500);
+}
+
+window.togglePasswordVisibility = function (inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const showing = input.type === "text";
+  input.type = showing ? "password" : "text";
+  if (btn) btn.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+};
+
+function setAuthAlert(boxId, message, type = "error", extraHtml = "") {
+  const el = document.getElementById(boxId);
+  if (!el) return;
+  if (!message && !extraHtml) {
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = `<div class="auth-msg ${type}">${escapeHtml(message)}${extraHtml}</div>`;
+}
+
+function clearAllAuthAlerts() {
+  ["loginAlertBox", "signupAlertBox", "otpAlertBox", "setPasswordAlertBox", "forgotAlertBox"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = "";
+  });
+}
+
+window.showAuthView = function (viewName) {
+  clearAllAuthAlerts();
+  const map = {
+    loading: "authViewLoading",
+    login: "authViewLogin",
+    signup: "authViewSignup",
+    otp: "authViewOtp",
+    setPassword: "authViewSetPassword",
+    forgot: "authViewForgot",
+  };
+  Object.values(map).forEach((elId) => {
+    const el = document.getElementById(elId);
+    if (el) el.style.display = "none";
+  });
+  const active = document.getElementById(map[viewName] || "authViewLogin");
+  if (active) active.style.display = "flex";
+
+  if (viewName === "login") {
+    const idEl = document.getElementById("loginIdentifier");
+    if (idEl && !idEl.value) idEl.focus();
+  } else if (viewName === "signup") {
+    const fnEl = document.getElementById("signupFirstName");
+    if (fnEl && !fnEl.value) fnEl.focus();
+  } else if (viewName === "otp") {
+    clearOtpBoxes();
+    setTimeout(() => {
+      const firstBox = document.querySelector("#otpBoxesRow .otp-digit-box");
+      if (firstBox) firstBox.focus();
+    }, 40);
+  } else if (viewName === "setPassword") {
+    const pwEl = document.getElementById("setPasswordInput");
+    if (pwEl) {
+      pwEl.value = "";
+      setTimeout(() => pwEl.focus(), 40);
+    }
+  }
+};
+
+function setLoginPasswordMode(usePassword) {
+  loginUsePassword = Boolean(usePassword);
+  const pwWrap = document.getElementById("loginPasswordWrap");
+  const pwInput = document.getElementById("loginPassword");
+  const toggleBtn = document.getElementById("toggleLoginModeBtn");
+  const forgotBtn = document.getElementById("forgotPwLink");
+  const submitBtn = document.getElementById("btnSubmitLogin");
+
+  if (pwWrap) pwWrap.style.display = loginUsePassword ? "flex" : "none";
+  if (pwInput) {
+    pwInput.required = loginUsePassword;
+    if (!loginUsePassword) pwInput.value = "";
+  }
+  if (toggleBtn) {
+    toggleBtn.textContent = loginUsePassword ? "Use 6-digit verification code instead" : "Sign in with password instead";
+  }
+  if (forgotBtn) forgotBtn.style.display = loginUsePassword ? "inline" : "none";
+  if (submitBtn) submitBtn.textContent = loginUsePassword ? "Log in" : "Continue";
+}
+
+window.toggleLoginPasswordMode = function () {
+  setAuthAlert("loginAlertBox", "");
+  setLoginPasswordMode(!loginUsePassword);
+  if (loginUsePassword) {
+    const pwEl = document.getElementById("loginPassword");
+    if (pwEl) pwEl.focus();
+  }
+};
+
+function classifyIdentifier(raw) {
+  const val = (raw || "").trim();
+  if (!val) {
+    throw new Error("Please enter your email address or 10-digit mobile number.");
+  }
+  if (val.includes("@")) {
+    const lower = val.toLowerCase();
+    if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(lower)) {
+      throw new Error("Please enter a valid email address (for example, farmer@gmail.com).");
+    }
+    return { type: "email", value: lower };
+  }
+  let digits = val.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length === 10 && /^[6-9]/.test(digits)) {
+    return { type: "phone", value: digits };
+  }
+  throw new Error("Please enter a valid email address or 10-digit Indian mobile number.");
+}
+
+function normalizeSupabaseUser(sbUser) {
+  const email = sbUser?.email || null;
+  const meta = sbUser?.user_metadata || {};
+  const profileName = meta.full_name || meta.name || "";
+  const fallbackName = email ? email.split("@")[0] : "Farmer";
+  return {
+    id: String(sbUser?.id || ""),
+    full_name: String(profileName).trim() || fallbackName,
+    email,
+    phone: sbUser?.phone || null,
+  };
+}
 
 function authHeaders(extra = {}) {
   const h = { ...extra };
@@ -194,6 +355,39 @@ function authHeaders(extra = {}) {
     h["Authorization"] = `Bearer ${state.authToken}`;
   }
   return h;
+}
+
+async function authHeadersAsync(extra = {}) {
+  const h = { ...extra };
+  if (state.authProvider === "supabase" && window.supabaseClient) {
+    try {
+      const { data } = await window.supabaseClient.auth.getSession();
+      if (data && data.session && data.session.access_token) {
+        state.authToken = data.session.access_token;
+      }
+    } catch (err) {
+      console.warn("Could not refresh Supabase session:", err);
+    }
+  }
+  if (state.authToken) {
+    h["Authorization"] = `Bearer ${state.authToken}`;
+  }
+  return h;
+}
+
+function handleUnauthorizedResponse(resp) {
+  if (resp && resp.status === 401) {
+    state.authToken = null;
+    state.currentUser = null;
+    state.authProvider = null;
+    sessionStorage.removeItem("cropsense_phone_token");
+    syncAuthLockState();
+    renderAuthSidebar();
+    window.showAuthView("login");
+    showToast("Your session expired. Please log in again.");
+    return true;
+  }
+  return false;
 }
 
 function syncAuthLockState() {
@@ -210,13 +404,118 @@ function syncAuthLockState() {
   }
 }
 
-async function loadCurrentUser() {
-  // Always require explicit Sign In on fresh webpage access
-  state.authToken = null;
+async function initAuthPortal() {
+  startAuthHeroCarousel();
+  window.showAuthView("loading");
+
+  // 1. Load public Supabase Auth config (URL + publishable key) from backend (.env.local)
+  try {
+    const cfgResp = await fetch(`${API_BASE}/api/config/supabase`);
+    if (cfgResp.ok) {
+      const cfg = await cfgResp.json();
+      state.supabaseConfig = cfg;
+      if (cfg.configured && cfg.url && cfg.publishableKey && window.supabase && typeof window.supabase.createClient === "function") {
+        window.supabaseClient = window.supabase.createClient(cfg.url, cfg.publishableKey);
+
+        window.supabaseClient.auth.onAuthStateChange(async (event, session) => {
+          if (event === "PASSWORD_RECOVERY" && session && session.user) {
+            setPasswordContext = {
+              kind: "supabase_set_password",
+              destination: session.user.email || "",
+              fullName: (session.user.user_metadata && session.user.user_metadata.full_name) || "",
+              session,
+            };
+            document.getElementById("setPasswordVerifiedChip").textContent = `✓ Verified ${session.user.email || "email"}`;
+            document.getElementById("setPasswordTitle").textContent = "Set your new password";
+            document.getElementById("setPasswordSub").textContent = "Choose a strong password (at least 6 characters) for your CropSense account.";
+            document.getElementById("setPasswordNameWrap").style.display = "none";
+            document.getElementById("setPasswordFullName").required = false;
+            window.showAuthView("setPassword");
+            return;
+          }
+          if (event === "TOKEN_REFRESHED" && session && session.access_token) {
+            state.authToken = session.access_token;
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("Could not initialize Supabase client:", err);
+  }
+
+  // 2. Hydrate active Supabase Auth session (including confirmation/magic-link return)
+  if (window.supabaseClient) {
+    try {
+      const { data } = await window.supabaseClient.auth.getSession();
+      if (data && data.session && data.session.user && data.session.access_token) {
+        await finalizeSupabaseSignIn(data.session, null);
+        return;
+      }
+    } catch (err) {
+      console.warn("Supabase session hydration skipped:", err);
+    }
+  }
+
+  // 3. Check if a phone-only session exists in this browser tab
+  const savedPhoneToken = sessionStorage.getItem("cropsense_phone_token");
+  if (savedPhoneToken) {
+    try {
+      const meResp = await fetch(`${API_BASE}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${savedPhoneToken}` },
+      });
+      if (meResp.ok) {
+        const meData = await meResp.json();
+        if (meData.authenticated && meData.user) {
+          await finalizeLocalPhoneSignIn(meData.user, savedPhoneToken, null);
+          return;
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+    sessionStorage.removeItem("cropsense_phone_token");
+  }
+
+  // 4. Not signed in -> keep app strictly locked and show Log in screen
   state.currentUser = null;
-  localStorage.removeItem("cropsense_auth_token");
+  state.authToken = null;
+  state.authProvider = null;
   syncAuthLockState();
   renderAuthSidebar();
+  setLoginPasswordMode(false);
+  window.showAuthView("login");
+}
+
+async function finalizeSupabaseSignIn(session, toastMsg) {
+  if (!session || !session.user || !session.access_token) return;
+  state.authProvider = "supabase";
+  state.authToken = session.access_token;
+  state.currentUser = normalizeSupabaseUser(session.user);
+  otpContext = null;
+  setPasswordContext = null;
+
+  syncAuthLockState();
+  renderAuthSidebar();
+  await loadFarms();
+  await loadHistory();
+  updateDashboardView();
+  if (toastMsg) showToast(toastMsg);
+}
+
+async function finalizeLocalPhoneSignIn(userObj, token, toastMsg) {
+  state.authProvider = "local_phone";
+  state.authToken = token;
+  state.currentUser = userObj;
+  sessionStorage.setItem("cropsense_phone_token", token);
+  otpContext = null;
+  setPasswordContext = null;
+
+  syncAuthLockState();
+  renderAuthSidebar();
+  await loadFarms();
+  await loadHistory();
+  updateDashboardView();
+  if (toastMsg) showToast(toastMsg);
 }
 
 function renderAuthSidebar() {
@@ -224,182 +523,379 @@ function renderAuthSidebar() {
   if (!box) return;
   if (state.currentUser) {
     const u = state.currentUser;
-    const contactParts = [u.phone ? `📱 ${u.phone}` : null, u.email ? `✉️ ${u.email}` : null]
+    const contactParts = [u.email ? `✉️ ${u.email}` : null, u.phone ? `📱 +91-${u.phone}` : null]
       .filter(Boolean)
       .join(" · ");
+    const providerBadge = state.authProvider === "supabase" ? " · Supabase Auth" : "";
     box.innerHTML = `
-      <div class="auth-user-name">👨‍🌾 ${escapeHtml(u.full_name)}</div>
-      <div class="auth-user-contact">${escapeHtml(contactParts)}</div>
-      <button class="auth-btn-small logout" onclick="logoutFarmer()">🔒 Sign Out</button>
+      <div class="auth-user-name">👨‍🌾 ${escapeHtml(u.full_name || "Farmer")}</div>
+      <div class="auth-user-contact">${escapeHtml(contactParts)}${escapeHtml(providerBadge)}</div>
+      <button class="auth-btn-small logout" onclick="logoutFarmer()">Sign Out</button>
     `;
   } else {
     box.innerHTML = `
       <div class="auth-user-name">👤 Not Signed In</div>
-      <div class="auth-user-contact">2-Step Verification Required</div>
-      <button class="auth-btn-small" onclick="openAuthModal('signin')">🔑 Sign In / Sign Up</button>
+      <div class="auth-user-contact">Sign in to access your farm records</div>
+      <button class="auth-btn-small" onclick="openAuthModal('login')">Sign In</button>
     `;
   }
 }
 
-window.openAuthModal = function (tab = "signin") {
+window.openAuthModal = function (view = "login") {
   const modal = document.getElementById("authModal");
   if (modal) modal.classList.add("show");
-  backToAuthStep1();
-  switchAuthTab(tab);
+  window.showAuthView(view === "signin" ? "login" : view);
 };
 
 window.closeAuthModal = function () {
-  // Never allow closing the modal if the user is not logged in
   if (!state.currentUser || !state.authToken) {
-    showToast("Please Sign In or Sign Up with 2-Step Verification to access CropSense.");
+    showToast("Please sign in to access CropSense.");
     return;
   }
   const modal = document.getElementById("authModal");
   if (modal) modal.classList.remove("show");
 };
 
-window.switchAuthTab = function (tab) {
-  const isSignup = tab === "signup";
-  const tabSignin = document.getElementById("tabBtnSignin");
-  const tabSignup = document.getElementById("tabBtnSignup");
-  const formSignin = document.getElementById("signinForm");
-  const formSignup = document.getElementById("signupForm");
-  const alertBox = document.getElementById("authAlertBox");
+function renderOtpBoxes(count = 6) {
+  const row = document.getElementById("otpBoxesRow");
+  if (!row) return;
+  const targetLen = count > 6 ? 8 : 6;
+  row.classList.toggle("len-8", targetLen === 8);
+  const existing = row.querySelectorAll(".otp-digit-box");
+  if (existing.length === targetLen) return;
+  row.innerHTML = Array.from({ length: targetLen }, (_, idx) => {
+    const ac = idx === 0 ? ' autocomplete="one-time-code"' : "";
+    return `<input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1"${ac} aria-label="Digit ${idx + 1}">`;
+  }).join("");
+  bindOtpBoxEvents();
+}
 
-  if (tabSignin) tabSignin.classList.toggle("active", !isSignup);
-  if (tabSignup) tabSignup.classList.toggle("active", isSignup);
-  if (formSignin) formSignin.style.display = isSignup ? "none" : "flex";
-  if (formSignup) formSignup.style.display = isSignup ? "flex" : "none";
-  if (alertBox) alertBox.innerHTML = "";
+function syncOtpHiddenInput() {
+  const boxes = Array.from(document.querySelectorAll("#otpBoxesRow .otp-digit-box"));
+  const val = boxes.map((b) => (b.value || "").replace(/\D/g, "")).join("");
+  const hidden = document.getElementById("otpCodeInput");
+  if (hidden) hidden.value = val;
+  boxes.forEach((b) => b.classList.toggle("filled", Boolean(b.value)));
+  return val;
+}
+
+function setOtpDigits(rawText) {
+  const digits = String(rawText || "").replace(/\D/g, "").slice(0, 8);
+  if (!digits) return "";
+  if (digits.length > 6) {
+    renderOtpBoxes(8);
+  }
+  const boxes = Array.from(document.querySelectorAll("#otpBoxesRow .otp-digit-box"));
+  boxes.forEach((b, i) => {
+    b.value = digits[i] || "";
+  });
+  const val = syncOtpHiddenInput();
+  if (val.length >= boxes.length) {
+    const submitBtn = document.getElementById("btnVerifyOtp");
+    if (submitBtn) submitBtn.focus();
+  } else if (boxes[val.length]) {
+    boxes[val.length].focus();
+  }
+  return val;
+}
+
+window.clearOtpBoxes = function () {
+  renderOtpBoxes(6);
+  const boxes = document.querySelectorAll("#otpBoxesRow .otp-digit-box");
+  boxes.forEach((b) => {
+    b.value = "";
+    b.classList.remove("filled");
+  });
+  const hidden = document.getElementById("otpCodeInput");
+  if (hidden) hidden.value = "";
+  if (boxes[0]) boxes[0].focus();
 };
 
-window.backToAuthStep1 = function () {
-  activeOtpChallengeId = null;
-  const s1 = document.getElementById("authStep1Wrap");
-  const s2 = document.getElementById("authStep2Wrap");
-  if (s1) s1.style.display = "block";
-  if (s2) s2.style.display = "none";
+window.pasteOtpFromClipboard = async function () {
+  setAuthAlert("otpAlertBox", "");
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      throw new Error("Clipboard read is not available here — press Ctrl+V directly inside the OTP boxes.");
+    }
+    const text = await navigator.clipboard.readText();
+    const digits = setOtpDigits(text);
+    if (!digits || digits.length < 6) {
+      setAuthAlert("otpAlertBox", "No 6-digit OTP found in your clipboard. Copy the code from your email and try again.", "info");
+      return;
+    }
+    showToast("OTP pasted! Click 'Verify OTP & Continue' to unlock CropSense.");
+  } catch (err) {
+    setAuthAlert("otpAlertBox", err.message || "Press Ctrl+V inside the first OTP box to paste your code.", "info");
+  }
 };
 
-function showOtpStep2(challengeData) {
-  activeOtpChallengeId = challengeData.challenge_id;
-  const s1 = document.getElementById("authStep1Wrap");
-  const s2 = document.getElementById("authStep2Wrap");
+function bindOtpBoxEvents() {
+  const row = document.getElementById("otpBoxesRow");
+  if (!row) return;
+  const boxes = Array.from(row.querySelectorAll(".otp-digit-box"));
+  boxes.forEach((box, idx) => {
+    box.addEventListener("input", (e) => {
+      const cleaned = (e.target.value || "").replace(/\D/g, "");
+      if (cleaned.length > 1) {
+        setOtpDigits(cleaned);
+        return;
+      }
+      e.target.value = cleaned;
+      syncOtpHiddenInput();
+      if (cleaned && boxes[idx + 1]) {
+        boxes[idx + 1].focus();
+      }
+    });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" && !e.target.value && boxes[idx - 1]) {
+        boxes[idx - 1].value = "";
+        boxes[idx - 1].focus();
+        syncOtpHiddenInput();
+      } else if (e.key === "ArrowLeft" && boxes[idx - 1]) {
+        boxes[idx - 1].focus();
+      } else if (e.key === "ArrowRight" && boxes[idx + 1]) {
+        boxes[idx + 1].focus();
+      }
+    });
+    box.addEventListener("paste", (e) => {
+      e.preventDefault();
+      const pasted = (e.clipboardData || window.clipboardData).getData("text");
+      setOtpDigits(pasted);
+    });
+  });
+}
+
+function openOtpScreen(ctx, demoCode = null, deliveryNote = "") {
+  otpContext = ctx;
+  bindOtpBoxEvents();
   const titleEl = document.getElementById("otpStepTitle");
   const subEl = document.getElementById("otpStepSub");
-  const alertEl = document.getElementById("otpAlertBox");
-  const simEl = document.getElementById("otpSimulatedInbox");
-  const codeIn = document.getElementById("otpCodeInput");
+  const previewEl = document.getElementById("otpSmsPreview");
+  const hintEl = document.getElementById("otpSupabaseHint");
 
-  if (s1) s1.style.display = "none";
-  if (s2) s2.style.display = "block";
-  if (alertEl) alertEl.innerHTML = "";
-  if (codeIn) {
-    codeIn.value = "";
-    codeIn.focus();
-  }
-
-  const isEmail = challengeData.channel === "email";
+  const isEmail = ctx.channel === "email" || ctx.kind.startsWith("supabase");
   if (titleEl) {
-    titleEl.textContent = isEmail
-      ? "📧 Step 2: Gmail Verification Code"
-      : "📱 Step 2: Mobile SMS Verification Code";
+    titleEl.textContent = isEmail ? "Verify your email" : "Verify your mobile number";
   }
   if (subEl) {
     subEl.textContent = isEmail
-      ? `Enter the 6-digit verification code sent to your Gmail (${challengeData.destination})`
-      : `Enter the 6-digit SMS verification code sent to +91-${challengeData.destination}`;
+      ? `Open your email (${ctx.destination}), copy the OTP code, and paste it below to continue.`
+      : `Enter the 6-digit SMS verification code sent to +91-${ctx.destination}.`;
   }
-
-  if (simEl) {
-    if (challengeData.demo_otp_code) {
-      const icon = isEmail ? "📧 Gmail Inbox Notification" : "💬 SMS Message Notification";
-      simEl.innerHTML = `
-        <div class="otp-sim-banner">
-          <div><b>${icon} (${escapeHtml(challengeData.destination)}):</b></div>
-          <div style="margin:6px 0">
-            Your CropSense 2-Step verification code is:
-            <span class="otp-sim-code">${escapeHtml(challengeData.demo_otp_code)}</span>
-            <button type="button" class="secondary" style="padding:4px 10px;font-size:12px" onclick="fillSimulatedOtp('${escapeHtml(challengeData.demo_otp_code)}')">
-              Auto-Fill Code
-            </button>
+  if (hintEl) {
+    hintEl.style.display = isEmail ? "block" : "none";
+  }
+  if (previewEl) {
+    if (demoCode) {
+      const badgeLabel = isEmail
+        ? `✉️ Email Verification Preview (${escapeHtml(ctx.destination)})`
+        : `📱 SMS Verification Preview (+91-${escapeHtml(ctx.destination)})`;
+      previewEl.innerHTML = `
+        <div class="auth-sms-preview">
+          <div><b>${badgeLabel}</b></div>
+          <div>
+            <span class="auth-sms-code-chip">${escapeHtml(demoCode)}</span>
+            <button type="button" class="auth-link" onclick="fillSimulatedOtp('${escapeHtml(demoCode)}')">Auto-fill code</button>
           </div>
-          <div class="sub" style="font-size:11px">${escapeHtml(challengeData.delivery_note || "")}</div>
+          <div style="opacity:0.8;font-size:11.5px;margin-top:4px">${escapeHtml(deliveryNote)}</div>
         </div>
       `;
     } else {
-      simEl.innerHTML = `
-        <div class="alert green">
-          <b>Live Code Dispatched:</b> ${escapeHtml(challengeData.delivery_note || "")}
-        </div>
-      `;
+      previewEl.innerHTML = "";
     }
   }
+  window.showAuthView("otp");
 }
 
 window.fillSimulatedOtp = function (code) {
-  const el = document.getElementById("otpCodeInput");
-  if (el) el.value = code;
+  setOtpDigits(code);
 };
 
-window.prefillAndSwitchAuth = function (targetTab, identifier) {
-  switchAuthTab(targetTab);
-  const val = (identifier || "").trim();
-  if (!val) return;
-  if (targetTab === "signup") {
-    if (val.includes("@")) {
-      document.getElementById("signupEmail").value = val;
-    } else {
-      document.getElementById("signupPhone").value = val;
-    }
-  } else {
-    document.getElementById("signinIdentifier").value = val;
+window.backFromOtp = function () {
+  const target = (otpContext && otpContext.returnView) || "login";
+  otpContext = null;
+  window.showAuthView(target);
+};
+
+window.sendEmailCodeInstead = async function (email) {
+  if (!window.supabaseClient) {
+    setAuthAlert("loginAlertBox", "Supabase Auth is not configured on this server.");
+    return;
   }
+  const cleanEmail = (email || "").trim().toLowerCase();
+  const redirectTo = `${window.location.origin}${window.location.pathname}`;
+  const { error } = await window.supabaseClient.auth.signInWithOtp({
+    email: cleanEmail,
+    options: { shouldCreateUser: true, emailRedirectTo: redirectTo },
+  });
+  if (error) {
+    setAuthAlert("loginAlertBox", error.message || "Could not send verification email.");
+    return;
+  }
+  openOtpScreen({ kind: "supabase_login_otp", channel: "email", destination: cleanEmail, returnView: "login" });
+  showToast(`Verification code sent to ${cleanEmail}`);
 };
 
-window.submitSignin = async function (event) {
+window.submitLogin = async function (event) {
   event.preventDefault();
-  const identifier = (document.getElementById("signinIdentifier").value || "").trim();
-  const password = document.getElementById("signinPassword").value || "";
-  const alertBox = document.getElementById("authAlertBox");
-  const btn = document.getElementById("btnSubmitSignin");
+  const rawId = (document.getElementById("loginIdentifier").value || "").trim();
+  const password = document.getElementById("loginPassword").value || "";
+  const btn = document.getElementById("btnSubmitLogin");
+  setAuthAlert("loginAlertBox", "");
+
+  let id;
+  try {
+    id = classifyIdentifier(rawId);
+  } catch (err) {
+    setAuthAlert("loginAlertBox", err.message);
+    return;
+  }
 
   if (btn) btn.disabled = true;
-  if (alertBox) alertBox.innerHTML = "";
-
   try {
+    // IDENTITY-FIRST FLOW (default): verify email (Supabase) or phone (SMS) BEFORE asking for password
+    if (!loginUsePassword) {
+      if (id.type === "email") {
+        if (!window.supabaseClient) throw new Error("Supabase Auth is not loaded yet. Please refresh the page.");
+        const redirectTo = `${window.location.origin}${window.location.pathname}`;
+        const { error } = await window.supabaseClient.auth.signInWithOtp({
+          email: id.value,
+          options: { shouldCreateUser: true, emailRedirectTo: redirectTo },
+        });
+        if (error) throw new Error(error.message || "Could not send email verification code.");
+        openOtpScreen({
+          kind: "supabase_login_otp",
+          channel: "email",
+          destination: id.value,
+          returnView: "login",
+        });
+        showToast(`Verification code sent to ${id.value}`);
+        return;
+      }
+
+      // Phone number: check if returning user or brand-new user
+      const checkResp = await fetch(`${API_BASE}/api/auth/check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: id.value }),
+      });
+      const checkData = await checkResp.json();
+      if (checkResp.ok && checkData.exists) {
+        setLoginPasswordMode(true);
+        setAuthAlert("loginAlertBox", "Account found! Enter your password to continue.", "info");
+        const pwEl = document.getElementById("loginPassword");
+        if (pwEl) pwEl.focus();
+        return;
+      }
+
+      // Brand-new phone user -> authenticate via 6-digit SMS OTP BEFORE asking for password
+      const startResp = await fetch(`${API_BASE}/api/auth/otp/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: id.value }),
+      });
+      const startData = await startResp.json();
+      if (!startResp.ok) throw new Error(startData.detail || "Could not send SMS verification code.");
+      openOtpScreen(
+        {
+          kind: "local_pre_auth",
+          channel: "sms",
+          destination: startData.destination,
+          challengeId: startData.challenge_id,
+          returnView: "login",
+        },
+        startData.demo_otp_code,
+        startData.delivery_note
+      );
+      showToast(`6-digit SMS verification code sent to +91-${startData.destination}`);
+      return;
+    }
+
+    // PASSWORD MODE (for returning users who prefer password — STILL enforces Email OTP before unlocking!)
+    if (id.type === "email") {
+      if (!window.supabaseClient) throw new Error("Supabase Auth is not loaded yet. Please refresh the page.");
+      const { data, error } = await window.supabaseClient.auth.signInWithPassword({
+        email: id.value,
+        password,
+      });
+      if (error) {
+        const safeEmail = escapeHtml(id.value);
+        setAuthAlert(
+          "loginAlertBox",
+          error.message || "Invalid email or password.",
+          "error",
+          `<div style="margin-top:8px"><button type="button" class="auth-link" onclick="sendEmailCodeInstead('${safeEmail}')">Send an Email OTP to ${safeEmail} instead →</button></div>`
+        );
+        return;
+      }
+      if (data && data.session) {
+        // Enforce mandatory Email OTP rule: clear step-1 session & send fresh Email OTP to paste
+        await window.supabaseClient.auth.signOut({ scope: "local" });
+        const redirectTo = `${window.location.origin}${window.location.pathname}`;
+        const { error: otpErr } = await window.supabaseClient.auth.signInWithOtp({
+          email: id.value,
+          options: { shouldCreateUser: false, emailRedirectTo: redirectTo },
+        });
+        if (otpErr) throw new Error(otpErr.message || "Password verified, but could not send Email OTP.");
+        openOtpScreen({
+          kind: "supabase_login_otp",
+          channel: "email",
+          destination: id.value,
+          returnView: "login",
+        });
+        showToast(`Password verified! Open ${id.value}, copy the OTP, and paste it here.`);
+      }
+      return;
+    }
+
+    // Returning Phone + Password
     const resp = await fetch(`${API_BASE}/api/auth/signin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier, password }),
+      body: JSON.stringify({ identifier: id.value, password }),
     });
     const data = await resp.json();
     if (!resp.ok) {
       if (resp.status === 404) {
-        if (alertBox) {
-          alertBox.innerHTML = `
-            <div class="alert">
-              <b>New User Detected:</b> ${escapeHtml(data.detail)}<br>
-              <button type="button" class="secondary" style="margin-top:8px" onclick="prefillAndSwitchAuth('signup', '${escapeHtml(identifier)}')">
-                🌱 Continue to Sign Up with "${escapeHtml(identifier)}" →
-              </button>
-            </div>
-          `;
-        }
+        const startResp = await fetch(`${API_BASE}/api/auth/otp/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: id.value }),
+        });
+        const startData = await startResp.json();
+        if (!startResp.ok) throw new Error(startData.detail || "Could not send SMS verification code.");
+        openOtpScreen(
+          {
+            kind: "local_pre_auth",
+            channel: "sms",
+            destination: startData.destination,
+            challengeId: startData.challenge_id,
+            returnView: "login",
+          },
+          startData.demo_otp_code,
+          startData.delivery_note
+        );
+        showToast("New mobile number detected — verify your number first.");
         return;
       }
-      throw new Error(data.detail || "Sign in failed");
+      throw new Error(data.detail || "Sign in failed.");
     }
-
     if (data.requires_otp) {
-      showOtpStep2(data);
-      showToast(`Step 1 verified! Enter the 6-digit ${data.channel === "email" ? "Gmail" : "SMS"} verification code.`);
-      return;
+      openOtpScreen(
+        {
+          kind: "local_signin",
+          channel: data.channel,
+          destination: data.destination,
+          challengeId: data.challenge_id,
+          returnView: "login",
+        },
+        data.demo_otp_code,
+        data.delivery_note
+      );
+      showToast(`Enter the 6-digit verification code sent to ${data.destination}`);
     }
   } catch (err) {
-    if (alertBox) {
-      alertBox.innerHTML = `<div class="alert red">${escapeHtml(err.message)}</div>`;
-    }
+    setAuthAlert("loginAlertBox", err.message || "Unable to continue.");
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -407,65 +903,111 @@ window.submitSignin = async function (event) {
 
 window.submitSignup = async function (event) {
   event.preventDefault();
-  const fullName = (document.getElementById("signupName").value || "").trim();
-  const phone = (document.getElementById("signupPhone").value || "").trim() || null;
-  const email = (document.getElementById("signupEmail").value || "").trim() || null;
-  const chSel = (document.getElementById("signupChannel") || {}).value || "auto";
-  const password = document.getElementById("signupPassword").value || "";
-  const alertBox = document.getElementById("authAlertBox");
+  const firstName = (document.getElementById("signupFirstName").value || "").trim();
+  const lastName = (document.getElementById("signupLastName").value || "").trim();
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+  const rawId = (document.getElementById("signupIdentifier").value || "").trim();
+  const termsEl = document.getElementById("signupTerms");
   const btn = document.getElementById("btnSubmitSignup");
+  setAuthAlert("signupAlertBox", "");
 
-  if (!phone && !email) {
-    if (alertBox) {
-      alertBox.innerHTML = `<div class="alert red">Please enter either your <b>Mobile Number</b> or your <b>Gmail Address</b> (or both) to create an account.</div>`;
-    }
+  if (fullName.length < 2) {
+    setAuthAlert("signupAlertBox", "Please enter your name (at least 2 characters).");
+    return;
+  }
+  if (termsEl && !termsEl.checked) {
+    setAuthAlert("signupAlertBox", "Please agree to the Terms & Conditions to continue.");
+    return;
+  }
+
+  let id;
+  try {
+    id = classifyIdentifier(rawId);
+  } catch (err) {
+    setAuthAlert("signupAlertBox", err.message);
     return;
   }
 
   if (btn) btn.disabled = true;
-  if (alertBox) alertBox.innerHTML = "";
-
   try {
-    const resp = await fetch(`${API_BASE}/api/auth/signup`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        full_name: fullName,
-        phone,
-        email,
-        password,
-        preferred_channel: chSel === "auto" ? null : chSel,
-      }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      if (resp.status === 409) {
-        const match = (data.detail || "").match(/'([^']+)'/);
-        const existingId = (match && match[1]) || phone || email || "";
-        if (alertBox) {
-          alertBox.innerHTML = `
-            <div class="alert">
-              <b>Account Already Exists:</b> ${escapeHtml(data.detail)}<br>
-              <button type="button" class="secondary" style="margin-top:8px" onclick="prefillAndSwitchAuth('signin', '${escapeHtml(existingId)}')">
-                🔑 Switch to Sign In with "${escapeHtml(existingId)}" →
-              </button>
-            </div>
-          `;
-        }
-        return;
-      }
-      throw new Error(data.detail || "Sign up failed");
-    }
-
-    if (data.requires_otp) {
-      showOtpStep2(data);
-      showToast(`6-digit verification code sent via ${data.channel === "email" ? "Gmail" : "SMS"}!`);
+    // Pre-password verification via Supabase Email OTP or Local SMS OTP
+    if (id.type === "email") {
+      if (!window.supabaseClient) throw new Error("Supabase Auth is not loaded yet. Please refresh the page.");
+      const redirectTo = `${window.location.origin}${window.location.pathname}`;
+      const { error } = await window.supabaseClient.auth.signInWithOtp({
+        email: id.value,
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: redirectTo,
+          data: { full_name: fullName },
+        },
+      });
+      if (error) throw new Error(error.message || "Could not send verification email.");
+      openOtpScreen({
+        kind: "supabase_signup_otp",
+        channel: "email",
+        destination: id.value,
+        fullName,
+        returnView: "signup",
+      });
+      showToast(`Verification code sent to ${id.value}`);
       return;
     }
+
+    const startResp = await fetch(`${API_BASE}/api/auth/otp/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier: id.value, full_name: fullName }),
+    });
+    const startData = await startResp.json();
+    if (!startResp.ok) throw new Error(startData.detail || "Could not send SMS verification code.");
+    openOtpScreen(
+      {
+        kind: "local_pre_auth",
+        channel: "sms",
+        destination: startData.destination,
+        fullName,
+        challengeId: startData.challenge_id,
+        returnView: "signup",
+      },
+      startData.demo_otp_code,
+      startData.delivery_note
+    );
+    showToast(`6-digit SMS verification code sent to +91-${startData.destination}`);
   } catch (err) {
-    if (alertBox) {
-      alertBox.innerHTML = `<div class="alert red">${escapeHtml(err.message)}</div>`;
-    }
+    setAuthAlert("signupAlertBox", err.message || "Could not start verification.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
+window.submitForgotEmail = async function (event) {
+  event.preventDefault();
+  const email = (document.getElementById("forgotEmailInput").value || "").trim().toLowerCase();
+  const btn = document.getElementById("btnSubmitForgot");
+  setAuthAlert("forgotAlertBox", "");
+
+  if (!window.supabaseClient) {
+    setAuthAlert("forgotAlertBox", "Supabase Auth is not loaded yet.");
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { error } = await window.supabaseClient.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: false, emailRedirectTo: redirectTo },
+    });
+    if (error) throw new Error(error.message || "Could not send verification code.");
+    openOtpScreen({
+      kind: "supabase_reset_otp",
+      channel: "email",
+      destination: email,
+      returnView: "forgot",
+    });
+    showToast(`Verification code sent to ${email}`);
+  } catch (err) {
+    setAuthAlert("forgotAlertBox", err.message);
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -473,110 +1015,286 @@ window.submitSignup = async function (event) {
 
 window.submitVerifyOtp = async function (event) {
   event.preventDefault();
-  const otpCode = (document.getElementById("otpCodeInput").value || "").trim();
-  const alertEl = document.getElementById("otpAlertBox");
+  const code = syncOtpHiddenInput();
   const btn = document.getElementById("btnVerifyOtp");
+  setAuthAlert("otpAlertBox", "");
 
-  if (!activeOtpChallengeId) {
-    backToAuthStep1();
+  if (!otpContext) {
+    window.showAuthView("login");
+    return;
+  }
+  if (code.length < 6 || code.length > 8) {
+    setAuthAlert("otpAlertBox", "Please enter or paste the 6-digit OTP code from your email or SMS.");
     return;
   }
 
   if (btn) btn.disabled = true;
-  if (alertEl) alertEl.innerHTML = "";
-
   try {
-    const resp = await fetch(`${API_BASE}/api/auth/verify-otp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        challenge_id: activeOtpChallengeId,
-        otp_code: otpCode,
-      }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      throw new Error(data.detail || "Invalid verification code");
+    if (
+      otpContext.kind === "supabase_login_otp" ||
+      otpContext.kind === "supabase_signup_otp" ||
+      otpContext.kind === "supabase_reset_otp"
+    ) {
+      let verifyResult = await window.supabaseClient.auth.verifyOtp({
+        email: otpContext.destination,
+        token: code,
+        type: "email",
+      });
+      if (verifyResult.error || !verifyResult.data?.session) {
+        // Fallback for Supabase signup/magiclink confirmation tokens
+        for (const fallbackType of ["signup", "magiclink"]) {
+          const retry = await window.supabaseClient.auth.verifyOtp({
+            email: otpContext.destination,
+            token: code,
+            type: fallbackType,
+          });
+          if (!retry.error && retry.data?.session) {
+            verifyResult = retry;
+            break;
+          }
+        }
+      }
+      const { data, error } = verifyResult;
+      if (error || !data?.session) {
+        throw new Error(error?.message || "Invalid or expired OTP code. Please check your email or click Resend OTP.");
+      }
+
+      // After verifying email on Create Account or Forgot/Set Password -> prompt to create/set password!
+      if (otpContext.kind === "supabase_signup_otp" || otpContext.kind === "supabase_reset_otp") {
+        const existingName = (otpContext.fullName || data.user?.user_metadata?.full_name || "").trim();
+        setPasswordContext = {
+          kind: "supabase_set_password",
+          destination: otpContext.destination,
+          fullName: existingName,
+          session: data.session,
+        };
+        document.getElementById("setPasswordVerifiedChip").textContent = `✓ Verified ${otpContext.destination}`;
+        document.getElementById("setPasswordTitle").textContent =
+          otpContext.kind === "supabase_reset_otp" ? "Set your new password" : "Create your password";
+        document.getElementById("setPasswordSub").textContent =
+          "Your email is verified via Supabase. Set a password (at least 6 characters) to finish.";
+        const nameWrap = document.getElementById("setPasswordNameWrap");
+        const nameInput = document.getElementById("setPasswordFullName");
+        if (existingName.length >= 2 || otpContext.kind === "supabase_reset_otp") {
+          nameWrap.style.display = "none";
+          nameInput.required = false;
+          nameInput.value = existingName;
+        } else {
+          nameWrap.style.display = "block";
+          nameInput.required = true;
+          nameInput.value = "";
+        }
+        window.showAuthView("setPassword");
+        return;
+      }
+
+      await finalizeSupabaseSignIn(data.session, `Verified! Welcome, ${normalizeSupabaseUser(data.user).full_name}.`);
+      return;
     }
 
-    state.authToken = data.token;
-    state.currentUser = data.user;
-    localStorage.setItem("cropsense_auth_token", data.token);
-    syncAuthLockState();
-    renderAuthSidebar();
-    await loadFarms();
-    await loadHistory();
-    updateDashboardView();
-    showToast(data.message || `2-Step Verification complete! Welcome, ${data.user.full_name}.`);
-  } catch (err) {
-    if (alertEl) {
-      alertEl.innerHTML = `<div class="alert red">${escapeHtml(err.message)}</div>`;
+    if (otpContext.kind === "local_pre_auth") {
+      const resp = await fetch(`${API_BASE}/api/auth/otp/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge_id: otpContext.challengeId, otp_code: code }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || "Invalid verification code.");
+
+      if (data.needs_password) {
+        const existingName = (data.full_name || otpContext.fullName || "").trim();
+        const destLabel = `+91-${data.destination}`;
+        setPasswordContext = {
+          kind: "local_complete",
+          destination: data.destination,
+          fullName: existingName,
+          token: data.verification_token,
+        };
+        document.getElementById("setPasswordVerifiedChip").textContent = `✓ Verified ${destLabel}`;
+        document.getElementById("setPasswordTitle").textContent = "Create your password";
+        document.getElementById("setPasswordSub").textContent =
+          "Your mobile number is verified. Set a password to complete your CropSense account.";
+        const nameWrap = document.getElementById("setPasswordNameWrap");
+        const nameInput = document.getElementById("setPasswordFullName");
+        if (existingName.length >= 2) {
+          nameWrap.style.display = "none";
+          nameInput.required = false;
+          nameInput.value = existingName;
+        } else {
+          nameWrap.style.display = "block";
+          nameInput.required = true;
+          nameInput.value = "";
+        }
+        window.showAuthView("setPassword");
+        return;
+      }
+
+      await finalizeLocalPhoneSignIn(data.user, data.token, data.message || "Welcome back!");
+      return;
     }
+
+    if (otpContext.kind === "local_signin") {
+      const resp = await fetch(`${API_BASE}/api/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge_id: otpContext.challengeId, otp_code: code }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || "Invalid verification code.");
+      await finalizeLocalPhoneSignIn(data.user, data.token, data.message || "Signed in!");
+    }
+  } catch (err) {
+    setAuthAlert("otpAlertBox", err.message || "Verification failed.");
   } finally {
     if (btn) btn.disabled = false;
   }
 };
 
 window.resendOtpCode = async function () {
-  if (!activeOtpChallengeId) return;
+  if (!otpContext) return;
+  const btn = document.getElementById("btnResendOtp");
+  if (btn) btn.disabled = true;
+  setAuthAlert("otpAlertBox", "");
   try {
-    const resp = await fetch(`${API_BASE}/api/auth/resend-otp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ challenge_id: activeOtpChallengeId }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || "Could not resend code");
-    showOtpStep2(data);
-    showToast("A fresh 6-digit verification code has been sent!");
+    if (otpContext.kind.startsWith("supabase_")) {
+      const redirectTo = `${window.location.origin}${window.location.pathname}`;
+      const { error } = await window.supabaseClient.auth.signInWithOtp({
+        email: otpContext.destination,
+        options: {
+          shouldCreateUser: otpContext.kind !== "supabase_reset_otp",
+          emailRedirectTo: redirectTo,
+          ...(otpContext.fullName ? { data: { full_name: otpContext.fullName } } : {}),
+        },
+      });
+      if (error) throw new Error(error.message || "Could not resend verification code.");
+      setAuthAlert("otpAlertBox", `A fresh verification code was sent to ${otpContext.destination}.`, "success");
+    } else if (otpContext.challengeId) {
+      const resp = await fetch(`${API_BASE}/api/auth/resend-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge_id: otpContext.challengeId }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || "Could not resend SMS code.");
+      otpContext.challengeId = data.challenge_id;
+      openOtpScreen(otpContext, data.demo_otp_code, data.delivery_note);
+      setAuthAlert("otpAlertBox", "A fresh 6-digit SMS code has been generated.", "success");
+    }
   } catch (err) {
-    showToast(err.message);
+    setAuthAlert("otpAlertBox", err.message || "Could not resend code.");
+  } finally {
+    if (btn) btn.disabled = false;
   }
 };
 
-window.saveSenderConfig = async function () {
-  const smtpEmail = (document.getElementById("cfgSmtpEmail").value || "").trim();
-  const smtpPass = (document.getElementById("cfgSmtpPass").value || "").trim();
-  const smsKey = (document.getElementById("cfgSmsKey").value || "").trim();
-  const statusEl = document.getElementById("cfgSenderStatus");
+window.submitSetPassword = async function (event) {
+  event.preventDefault();
+  if (!setPasswordContext) {
+    window.showAuthView("login");
+    return;
+  }
+  const password = document.getElementById("setPasswordInput").value || "";
+  const fullNameInput = (document.getElementById("setPasswordFullName").value || "").trim();
+  const btn = document.getElementById("btnSubmitSetPassword");
+  setAuthAlert("setPasswordAlertBox", "");
 
+  if (password.length < 6) {
+    setAuthAlert("setPasswordAlertBox", "Password must be at least 6 characters.");
+    return;
+  }
+
+  if (btn) btn.disabled = true;
   try {
-    const resp = await fetch(`${API_BASE}/api/auth/sender-settings`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        smtp_email: smtpEmail || null,
-        smtp_app_password: smtpPass || null,
-        fast2sms_api_key: smsKey || null,
-      }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error("Failed to save sender config");
-    if (statusEl) {
-      statusEl.textContent = `Saved! Gmail SMTP: ${data.smtp_configured ? "Active (" + data.smtp_email + ")" : "Not set"} · SMS Gateway: ${data.sms_configured ? "Active" : "Simulated"}`;
+    if (setPasswordContext.kind === "supabase_set_password") {
+      const finalName = fullNameInput || setPasswordContext.fullName;
+      const updatePayload = { password };
+      if (finalName && finalName.length >= 2) {
+        updatePayload.data = { full_name: finalName };
+      }
+      const { error } = await window.supabaseClient.auth.updateUser(updatePayload);
+      if (error) throw new Error(error.message || "Could not save password.");
+
+      const { data: sessData } = await window.supabaseClient.auth.getSession();
+      const activeSession = (sessData && sessData.session) || setPasswordContext.session;
+      if (activeSession) {
+        await finalizeSupabaseSignIn(activeSession, "Password saved! Welcome to CropSense.");
+        return;
+      }
+      document.getElementById("loginIdentifier").value = setPasswordContext.destination;
+      setLoginPasswordMode(true);
+      window.showAuthView("login");
+      setAuthAlert("loginAlertBox", "Password saved! You can now log in.", "success");
+      return;
     }
-    showToast("Live OTP sender settings updated!");
+
+    if (setPasswordContext.kind === "local_complete") {
+      const finalName = fullNameInput || setPasswordContext.fullName;
+      if (!finalName || finalName.length < 2) {
+        throw new Error("Please enter your full name (at least 2 characters).");
+      }
+      const resp = await fetch(`${API_BASE}/api/auth/otp/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          verification_token: setPasswordContext.token,
+          password,
+          full_name: finalName,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || "Could not complete account setup.");
+      await finalizeLocalPhoneSignIn(data.user, data.token, data.message || "Account created!");
+    }
   } catch (err) {
-    showToast(err.message);
+    setAuthAlert("setPasswordAlertBox", err.message || "Could not save password.");
+  } finally {
+    if (btn) btn.disabled = false;
   }
 };
 
 window.logoutFarmer = async function () {
   try {
-    await fetch(`${API_BASE}/api/auth/logout`, {
-      method: "POST",
-      headers: authHeaders(),
-    });
+    if (state.authProvider === "supabase" && window.supabaseClient) {
+      await window.supabaseClient.auth.signOut();
+    } else if (state.authToken) {
+      await fetch(`${API_BASE}/api/auth/logout`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+    }
   } catch (e) {
     // ignore network error on logout
   }
+
   state.authToken = null;
   state.currentUser = null;
-  localStorage.removeItem("cropsense_auth_token");
-  backToAuthStep1();
+  state.authProvider = null;
+  state.farms = [];
+  state.activeFarm = null;
+  state.assessments = [];
+  state.cropResult = null;
+  state.soilResult = null;
+  state.weatherResult = null;
+  state.riskResult = null;
+  state.advisoryResult = null;
+  state.calendarResult = null;
+  otpContext = null;
+  setPasswordContext = null;
+
+  sessionStorage.removeItem("cropsense_phone_token");
+  localStorage.removeItem("cropsense_active_farm_id");
+
+  renderActiveFarmBanner();
+  renderSavedFarmsList();
+  renderHistoryTable();
+  renderTrendChart();
+  updateDashboardView();
+
   syncAuthLockState();
   renderAuthSidebar();
-  showToast("Signed out. Please sign in with 2-Step Verification to continue.");
+  setLoginPasswordMode(false);
+  window.showAuthView("login");
+  showToast("Signed out securely.");
 };
 
 function renderSoilInputs() {
@@ -654,17 +1372,23 @@ async function loadModelStatus() {
 // -------------------------
 
 async function loadFarms() {
+  if (!state.authToken) return;
   try {
-    const resp = await fetch(`${API_BASE}/api/farms`, { headers: authHeaders() });
+    const resp = await fetch(`${API_BASE}/api/farms`, { headers: await authHeadersAsync() });
+    if (handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) return;
     const data = await resp.json();
     state.farms = data.farms || [];
 
-    const savedId = Number(localStorage.getItem("cropsense_active_farm_id"));
-    const match = state.farms.find((f) => f.id === savedId) || state.farms[0] || null;
+    const savedId = localStorage.getItem("cropsense_active_farm_id");
+    const match =
+      (savedId ? state.farms.find((f) => String(f.id) === String(savedId)) : null) ||
+      state.farms[0] ||
+      null;
     if (match) {
       await setActiveFarm(match, false);
     } else {
+      state.activeFarm = null;
       renderActiveFarmBanner();
       renderSavedFarmsList();
     }
@@ -790,7 +1514,8 @@ function renderSavedFarmsList() {
         <tbody>
           ${state.farms
             .map((f) => {
-              const isAct = state.activeFarm && state.activeFarm.id === f.id;
+              const isAct = state.activeFarm && String(state.activeFarm.id) === String(f.id);
+              const safeId = escapeHtml(String(f.id));
               const loc = [f.village, f.district, f.state].filter(Boolean).join(", ") || "—";
               const dimText =
                 f.plot_length_m && f.plot_width_m
@@ -809,8 +1534,8 @@ function renderSavedFarmsList() {
                   <td>${sizeStr}</td>
                   <td>${escapeHtml(f.crop_name || "—")}</td>
                   <td>
-                    <button class="secondary" onclick="selectFarmById(${f.id})">Select</button>
-                    <button class="danger-btn" onclick="deleteFarmById(${f.id})">Delete</button>
+                    <button class="secondary" onclick="selectFarmById('${safeId}')">Select</button>
+                    <button class="danger-btn" onclick="deleteFarmById('${safeId}')">Delete</button>
                   </td>
                 </tr>
               `;
@@ -823,15 +1548,19 @@ function renderSavedFarmsList() {
 }
 
 window.selectFarmById = async function (id) {
-  const farm = state.farms.find((f) => f.id === id);
+  const farm = state.farms.find((f) => String(f.id) === String(id));
   if (farm) await setActiveFarm(farm, true);
 };
 
 window.deleteFarmById = async function (id) {
   try {
-    const resp = await fetch(`${API_BASE}/api/farms/${id}`, { method: "DELETE" });
+    const resp = await fetch(`${API_BASE}/api/farms/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: await authHeadersAsync(),
+    });
+    if (handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) throw new Error("Failed to delete farm");
-    if (state.activeFarm && state.activeFarm.id === id) {
+    if (state.activeFarm && String(state.activeFarm.id) === String(id)) {
       state.activeFarm = null;
     }
     await loadFarms();
@@ -1030,9 +1759,10 @@ window.saveFarmProfile = async function () {
   try {
     const resp = await fetch(`${API_BASE}/api/farms`, {
       method: "POST",
-      headers: authHeaders({ "Content-Type": "application/json" }),
+      headers: await authHeadersAsync({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     });
+    if (handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) {
       const errData = await resp.json().catch(() => ({}));
       throw new Error(errData.detail || "Could not save farm");
@@ -1918,6 +2648,10 @@ window.runFullAdvisory = async function (saveToHistory = true) {
 
   const payload = {
     farm_id: state.activeFarm ? state.activeFarm.id : null,
+    farm_name: state.activeFarm ? state.activeFarm.farm_name : null,
+    village: state.activeFarm ? state.activeFarm.village : null,
+    district: state.activeFarm ? state.activeFarm.district : null,
+    state: state.activeFarm ? state.activeFarm.state : null,
     crop_name: getSelectedCrop(),
     growth_stage: getSelectedStage(),
     sowing_date: sowingDate,
@@ -1933,9 +2667,10 @@ window.runFullAdvisory = async function (saveToHistory = true) {
   try {
     const resp = await fetch(`${API_BASE}/api/advisory/generate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authHeadersAsync({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     });
+    if (handleUnauthorizedResponse(resp)) return;
     const data = await resp.json();
     if (!resp.ok) {
       throw new Error(data.detail || "Could not generate advisory");
@@ -1954,7 +2689,7 @@ window.runFullAdvisory = async function (saveToHistory = true) {
     switchPage("advisory");
     showToast(
       saveToHistory && data.saved_assessment
-        ? `Advisory generated and saved to History (#${data.saved_assessment.id}).`
+        ? `Advisory generated and saved to History (${formatShortId(data.saved_assessment.id)}).`
         : "Advisory updated."
     );
   } catch (err) {
@@ -2355,9 +3090,13 @@ function updateDashboardView() {
 }
 
 window.loadHistory = async function () {
+  if (!state.authToken) return;
   try {
-    const farmQuery = state.activeFarm ? `?farm_id=${state.activeFarm.id}` : "";
-    const resp = await fetch(`${API_BASE}/api/assessments${farmQuery}`);
+    const farmQuery = state.activeFarm ? `?farm_id=${encodeURIComponent(state.activeFarm.id)}` : "";
+    const resp = await fetch(`${API_BASE}/api/assessments${farmQuery}`, {
+      headers: await authHeadersAsync(),
+    });
+    if (handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) return;
     const data = await resp.json();
     state.assessments = data.assessments || [];
@@ -2376,7 +3115,7 @@ function renderHistoryTable() {
     tbody.innerHTML = `
       <tr>
         <td colspan="7" style="text-align:center;padding:20px" class="sub">
-          No assessments saved in SQLite yet. Run an analysis and click "Generate & Save Full Advisory".
+          No assessments saved yet. Run an analysis and click "Generate &amp; Save Full Advisory".
         </td>
       </tr>
     `;
@@ -2387,16 +3126,17 @@ function renderHistoryTable() {
     .map((a) => {
       const pillCls = a.risk_level === "HIGH" ? "problem" : a.risk_level === "MODERATE" ? "attention" : "ok";
       const confStr = a.model_confidence != null ? ` (${(a.model_confidence * 100).toFixed(0)}%)` : "";
+      const safeId = escapeHtml(String(a.id));
       return `
         <tr>
-          <td>#${a.id} · ${escapeHtml((a.assessment_date || "").slice(0, 16))}</td>
+          <td>${escapeHtml(formatShortId(a.id))} · ${escapeHtml((a.assessment_date || "").slice(0, 16))}</td>
           <td><b>${escapeHtml(a.crop_name)}</b> <span class="sub">(${escapeHtml(a.growth_stage || "—")})</span></td>
           <td>${escapeHtml(a.predicted_disease || "Not run")}${escapeHtml(confStr)}</td>
           <td>${a.soil_score != null ? `<b>${a.soil_score}</b>/100` : "—"}</td>
           <td><span class="pill ${pillCls}">${escapeHtml(a.risk_level || "—")} (${a.risk_score ?? "--"})</span></td>
           <td>
-            <button class="secondary" onclick="viewAssessmentDetail(${a.id})">View Advisory</button>
-            <button class="danger-btn" onclick="deleteAssessmentById(${a.id})">Delete</button>
+            <button class="secondary" onclick="viewAssessmentDetail('${safeId}')">View Advisory</button>
+            <button class="danger-btn" onclick="deleteAssessmentById('${safeId}')">Delete</button>
           </td>
         </tr>
       `;
@@ -2423,7 +3163,7 @@ function renderTrendChart() {
   canvas.style.display = "block";
   if (emptyNote) emptyNote.style.display = "none";
 
-  const labels = items.map((a) => `#${a.id} (${(a.assessment_date || "").slice(5, 10)})`);
+  const labels = items.map((a) => `${formatShortId(a.id)} (${(a.assessment_date || "").slice(5, 10)})`);
   const riskData = items.map((a) => a.risk_score ?? null);
   const soilData = items.map((a) => a.soil_score ?? null);
 
@@ -2464,7 +3204,10 @@ function renderTrendChart() {
 
 window.viewAssessmentDetail = async function (id) {
   try {
-    const resp = await fetch(`${API_BASE}/api/assessments/${id}`);
+    const resp = await fetch(`${API_BASE}/api/assessments/${encodeURIComponent(id)}`, {
+      headers: await authHeadersAsync(),
+    });
+    if (handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) throw new Error("Could not load assessment");
     const rec = await resp.json();
     if (rec.details && rec.advisory) {
@@ -2472,7 +3215,7 @@ window.viewAssessmentDetail = async function (id) {
       state.advisoryResult = rec.advisory;
       renderAdvisoryPage(rec.details, rec.advisory);
       switchPage("advisory");
-      showToast(`Loaded saved assessment #${id} from ${rec.assessment_date.slice(0, 10)}`);
+      showToast(`Loaded saved assessment ${formatShortId(id)} from ${(rec.assessment_date || "").slice(0, 10)}`);
     }
   } catch (err) {
     showToast(err.message);
@@ -2481,11 +3224,15 @@ window.viewAssessmentDetail = async function (id) {
 
 window.deleteAssessmentById = async function (id) {
   try {
-    const resp = await fetch(`${API_BASE}/api/assessments/${id}`, { method: "DELETE" });
+    const resp = await fetch(`${API_BASE}/api/assessments/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: await authHeadersAsync(),
+    });
+    if (handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) throw new Error("Failed to delete assessment");
     await loadHistory();
     updateDashboardView();
-    showToast(`Assessment #${id} deleted.`);
+    showToast(`Assessment ${formatShortId(id)} deleted.`);
   } catch (err) {
     showToast("Could not delete assessment.");
   }

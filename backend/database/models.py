@@ -55,7 +55,7 @@ def list_farms(user_id: Optional[int] = None) -> list[dict]:
     with get_connection() as conn:
         if user_id is not None:
             rows = conn.execute(
-                "SELECT * FROM farms WHERE user_id = ? OR user_id IS NULL ORDER BY id DESC",
+                "SELECT * FROM farms WHERE user_id = ? ORDER BY id DESC",
                 (user_id,),
             ).fetchall()
         else:
@@ -63,25 +63,41 @@ def list_farms(user_id: Optional[int] = None) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
-def get_farm(farm_id: int) -> Optional[dict]:
+def get_farm(farm_id: int, user_id: Optional[int] = None) -> Optional[dict]:
     with get_connection() as conn:
-        row = conn.execute("SELECT * FROM farms WHERE id = ?", (farm_id,)).fetchone()
+        if user_id is not None:
+            row = conn.execute(
+                "SELECT * FROM farms WHERE id = ? AND user_id = ?", (farm_id, user_id)
+            ).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM farms WHERE id = ?", (farm_id,)).fetchone()
     return _row_to_dict(row)
 
 
-def update_farm(farm_id: int, farm: dict) -> Optional[dict]:
+def update_farm(farm_id: int, farm: dict, user_id: Optional[int] = None) -> Optional[dict]:
     assignments = ", ".join(f"{f} = ?" for f in FARM_FIELDS)
     values = _prepare_farm_values(farm) + [farm_id]
     with get_connection() as conn:
-        cur = conn.execute(f"UPDATE farms SET {assignments} WHERE id = ?", values)
+        if user_id is not None:
+            cur = conn.execute(
+                f"UPDATE farms SET {assignments} WHERE id = ? AND user_id = ?",
+                values + [user_id],
+            )
+        else:
+            cur = conn.execute(f"UPDATE farms SET {assignments} WHERE id = ?", values)
         if cur.rowcount == 0:
             return None
-    return get_farm(farm_id)
+    return get_farm(farm_id, user_id=user_id)
 
 
-def delete_farm(farm_id: int) -> bool:
+def delete_farm(farm_id: int, user_id: Optional[int] = None) -> bool:
     with get_connection() as conn:
-        cur = conn.execute("DELETE FROM farms WHERE id = ?", (farm_id,))
+        if user_id is not None:
+            cur = conn.execute(
+                "DELETE FROM farms WHERE id = ? AND user_id = ?", (farm_id, user_id)
+            )
+        else:
+            cur = conn.execute("DELETE FROM farms WHERE id = ?", (farm_id,))
         return cur.rowcount > 0
 
 
@@ -103,25 +119,41 @@ def create_assessment(record: dict[str, Any]) -> dict:
     return get_assessment(new_id)
 
 
-def get_assessment(assessment_id: int) -> Optional[dict]:
+def get_assessment(assessment_id: int, user_id: Optional[int] = None) -> Optional[dict]:
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM assessments WHERE id = ?", (assessment_id,)
-        ).fetchone()
+        if user_id is not None:
+            row = conn.execute(
+                "SELECT * FROM assessments WHERE id = ? AND user_id = ?",
+                (assessment_id, user_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM assessments WHERE id = ?", (assessment_id,)
+            ).fetchone()
     return _row_to_dict(row)
 
 
-def list_assessments(farm_id: Optional[int] = None, limit: int = 50) -> list[dict]:
+def list_assessments(
+    farm_id: Optional[int] = None,
+    limit: int = 50,
+    user_id: Optional[int] = None,
+) -> list[dict]:
     """Return a lightweight list (without the large JSON blobs)."""
     sql = (
-        "SELECT id, farm_id, crop_name, growth_stage, assessment_date, image_filename, "
+        "SELECT id, user_id, farm_id, crop_name, growth_stage, assessment_date, image_filename, "
         "predicted_disease, model_confidence, crop_status, soil_score, risk_score, risk_level "
         "FROM assessments"
     )
+    clauses: list[str] = []
     params: list[Any] = []
+    if user_id is not None:
+        clauses.append("user_id = ?")
+        params.append(user_id)
     if farm_id is not None:
-        sql += " WHERE farm_id = ?"
+        clauses.append("farm_id = ?")
         params.append(farm_id)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY assessment_date DESC, id DESC LIMIT ?"
     params.append(limit)
     with get_connection() as conn:
@@ -129,7 +161,13 @@ def list_assessments(farm_id: Optional[int] = None, limit: int = 50) -> list[dic
     return [dict(r) for r in rows]
 
 
-def delete_assessment(assessment_id: int) -> bool:
+def delete_assessment(assessment_id: int, user_id: Optional[int] = None) -> bool:
     with get_connection() as conn:
-        cur = conn.execute("DELETE FROM assessments WHERE id = ?", (assessment_id,))
+        if user_id is not None:
+            cur = conn.execute(
+                "DELETE FROM assessments WHERE id = ? AND user_id = ?",
+                (assessment_id, user_id),
+            )
+        else:
+            cur = conn.execute("DELETE FROM assessments WHERE id = ?", (assessment_id,))
         return cur.rowcount > 0

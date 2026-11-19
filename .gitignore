@@ -9,6 +9,10 @@ __pycache__/
 
 # Environment/secrets
 .env
+.env.*
+!.env.example
+.insforge/
+node_modules/
 
 # VS Code local settings
 .vscode/
@@ -26,3 +30,18 @@ backend/data/
 # Large ML datasets (keep model weights & evaluation reports tracked or optional)
 backend/ml/dataset/
 plantvillage dataset/
+
+# InsForge & AI agent skills
+.insforge
+.agent
+.agents
+.augment
+.claude
+.cline
+.github/copilot*
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf

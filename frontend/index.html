@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>CropSense — Smart Crop Advisory System for Small & Marginal Farmers</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/styles.css?v=4">
+  <link rel="stylesheet" href="css/styles.css?v=9">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body.auth-locked {
       margin: 0;
       min-height: 100vh;
-      background: linear-gradient(135deg, #081c15 0%, #1b4332 55%, #2d6a4f 100%);
+      background: radial-gradient(circle at 22% 18%, #2b5441 0%, #183629 50%, #0d2118 100%);
     }
     body.auth-locked #appShell {
       display: none !important;
@@ -24,7 +25,7 @@
       align-items: center;
       justify-content: center;
       z-index: 9999;
-      padding: 16px;
+      padding: 20px;
       overflow-y: auto;
     }
   </style>
@@ -784,119 +785,294 @@
   </main>
 </div>
 
-<!-- MANDATORY FARMER AUTHENTICATION & 2-STEP VERIFICATION PORTAL -->
+<!-- MANDATORY SPLIT-SCREEN FARMER AUTHENTICATION PORTAL -->
 <div id="authModal" class="modal-backdrop show" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
-  <div class="auth-modal-card">
-    <div style="text-align:center;margin-bottom:10px">
-      <div style="font-size:26px;font-weight:800;color:#1b4332">🌿 CropSense</div>
-      <div class="sub">Smart Crop Advisory System for Small & Marginal Farmers</div>
-    </div>
+  <div class="auth-split-card">
 
-    <div id="authStep1Wrap">
-      <div class="auth-tabs">
-        <button id="tabBtnSignin" class="auth-tab-btn active" onclick="switchAuthTab('signin')">Sign In (Existing User)</button>
-        <button id="tabBtnSignup" class="auth-tab-btn" onclick="switchAuthTab('signup')">Sign Up (New User)</button>
+    <!-- LEFT VISUAL HERO PANEL -->
+    <div class="auth-hero-panel">
+      <svg class="auth-hero-art" viewBox="0 0 460 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        <defs>
+          <linearGradient id="skyGrad" x1="0%" y1="0%" x2="20%" y2="100%">
+            <stop offset="0%" stop-color="#40916c"/>
+            <stop offset="40%" stop-color="#2d6a4f"/>
+            <stop offset="76%" stop-color="#1b4332"/>
+            <stop offset="100%" stop-color="#081c15"/>
+          </linearGradient>
+          <linearGradient id="ridgeBack" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#2d6a4f"/>
+            <stop offset="55%" stop-color="#1b4332"/>
+            <stop offset="100%" stop-color="#0d261c"/>
+          </linearGradient>
+          <linearGradient id="ridgeMid" x1="15%" y1="0%" x2="85%" y2="100%">
+            <stop offset="0%" stop-color="#3c8663"/>
+            <stop offset="48%" stop-color="#1f4d39"/>
+            <stop offset="100%" stop-color="#0b2017"/>
+          </linearGradient>
+          <linearGradient id="ridgeFront" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#245540"/>
+            <stop offset="60%" stop-color="#123023"/>
+            <stop offset="100%" stop-color="#071710"/>
+          </linearGradient>
+          <radialGradient id="duskGlow" cx="62%" cy="30%" r="55%">
+            <stop offset="0%" stop-color="#95d5b2" stop-opacity="0.34"/>
+            <stop offset="65%" stop-color="#52b788" stop-opacity="0.1"/>
+            <stop offset="100%" stop-color="#1b4332" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <rect width="460" height="600" fill="url(#skyGrad)"/>
+        <rect width="460" height="600" fill="url(#duskGlow)"/>
+        <!-- Subtle sunlit canopy mist -->
+        <path d="M-20 205 Q65 182 150 202 Q205 215 265 198 Q180 228 95 224 Q25 222 -20 218 Z" fill="#1b4332" opacity="0.46"/>
+        <!-- Rolling emerald hills & terraced farmland -->
+        <path d="M-10 295 Q115 210 220 255 Q340 302 475 265 L475 610 L-10 610 Z" fill="url(#ridgeBack)"/>
+        <path d="M-10 355 Q135 288 265 348 Q375 398 475 360 L475 610 L-10 610 Z" fill="url(#ridgeMid)"/>
+        <path d="M-10 438 Q165 370 305 432 Q400 472 475 445 L475 610 L-10 610 Z" fill="url(#ridgeFront)"/>
+        <path d="M-10 515 Q190 475 475 535 L475 610 L-10 610 Z" fill="#071610" opacity="0.9"/>
+      </svg>
+
+      <div class="auth-hero-top">
+        <div class="auth-hero-logo">🌿 CropSense</div>
+        <span class="auth-hero-pill">Smart Crop AI →</span>
       </div>
 
-      <div id="authAlertBox"></div>
-
-      <!-- SIGN IN FORM (STEP 1) -->
-      <form id="signinForm" class="auth-form-stack" onsubmit="submitSignin(event)">
-        <label for="signinIdentifier">
-          Gmail Address OR Mobile Number *
-          <input id="signinIdentifier" type="text" required placeholder="e.g. farmer@gmail.com OR 9876543210" autocomplete="username">
-        </label>
-        <label for="signinPassword">
-          Password *
-          <input id="signinPassword" type="password" required minlength="6" placeholder="Enter your password" autocomplete="current-password">
-        </label>
-        <button type="submit" id="btnSubmitSignin">🔐 Continue to 2-Step Verification →</button>
-        <div class="auth-or-divider">
-          New to CropSense? <a href="#" onclick="switchAuthTab('signup'); return false;"><b>Create a new farmer account →</b></a>
+      <div class="auth-hero-bottom">
+        <p id="authHeroTagline" class="auth-hero-tagline">Growing Smarter,&#10;Harvesting Better</p>
+        <div class="auth-hero-dots" role="tablist" aria-label="Highlights">
+          <button type="button" class="auth-hero-dot active" data-slide="0" onclick="setAuthHeroSlide(0)" aria-label="Slide 1"></button>
+          <button type="button" class="auth-hero-dot" data-slide="1" onclick="setAuthHeroSlide(1)" aria-label="Slide 2"></button>
+          <button type="button" class="auth-hero-dot" data-slide="2" onclick="setAuthHeroSlide(2)" aria-label="Slide 3"></button>
         </div>
-      </form>
-
-      <!-- SIGN UP FORM (STEP 1) -->
-      <form id="signupForm" class="auth-form-stack" style="display:none" onsubmit="submitSignup(event)">
-        <label for="signupName">
-          Full Name *
-          <input id="signupName" type="text" required minlength="2" placeholder="e.g. Raju Kumar" autocomplete="name">
-        </label>
-        <label for="signupPhone">
-          Mobile Number (10 digits) <span class="unit-hint">(For SMS OTP verification)</span>
-          <input id="signupPhone" type="tel" placeholder="e.g. 9876543210" autocomplete="tel">
-        </label>
-        <label for="signupEmail">
-          Gmail / Email Address <span class="unit-hint">(For Gmail OTP verification)</span>
-          <input id="signupEmail" type="email" placeholder="e.g. farmer@gmail.com" autocomplete="email">
-        </label>
-        <label for="signupChannel">
-          2-Step Verification Method (If both Email & Phone are entered)
-          <select id="signupChannel">
-            <option value="auto" selected>Auto (Gmail if email entered, SMS if phone entered)</option>
-            <option value="email">📧 Verify via Gmail Code</option>
-            <option value="sms">📱 Verify via Mobile SMS Code</option>
-          </select>
-        </label>
-        <label for="signupPassword">
-          Create Password * <span class="unit-hint">(at least 6 characters)</span>
-          <input id="signupPassword" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="new-password">
-        </label>
-        <button type="submit" id="btnSubmitSignup">📩 Send 6-Digit Verification Code →</button>
-        <div class="auth-or-divider">
-          Already have an account? <a href="#" onclick="switchAuthTab('signin'); return false;"><b>Sign in here →</b></a>
-        </div>
-      </form>
-    </div>
-
-    <!-- STEP 2: 6-DIGIT OTP VERIFICATION (GMAIL OR SMS) -->
-    <div id="authStep2Wrap" style="display:none">
-      <h3 id="otpStepTitle" style="margin:6px 0 4px;text-align:center">🔒 2-Step Verification</h3>
-      <p id="otpStepSub" class="sub" style="text-align:center;margin-bottom:12px"></p>
-
-      <div id="otpAlertBox"></div>
-      <div id="otpSimulatedInbox"></div>
-
-      <form id="otpVerifyForm" class="auth-form-stack" onsubmit="submitVerifyOtp(event)">
-        <label for="otpCodeInput" style="text-align:center">
-          Enter 6-Digit Verification Code
-          <input id="otpCodeInput" class="otp-code-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required placeholder="000000" autocomplete="one-time-code">
-        </label>
-        <button type="submit" id="btnVerifyOtp">✅ Verify Code & Unlock CropSense</button>
-        <div style="display:flex;justify-content:space-between;gap:8px;margin-top:4px">
-          <button type="button" class="secondary" style="flex:1" onclick="resendOtpCode()">🔄 Resend Code</button>
-          <button type="button" class="secondary" style="flex:1" onclick="backToAuthStep1()">← Back</button>
-        </div>
-      </form>
-    </div>
-
-    <!-- OPTIONAL REAL GMAIL SMTP / FAST2SMS SENDER CONFIG -->
-    <details style="margin-top:16px;border-top:1px solid var(--line);padding-top:10px;font-size:12px">
-      <summary style="cursor:pointer;color:var(--muted);font-weight:600">⚙️ Configure Live Gmail SMTP / SMS Gateway (Optional)</summary>
-      <div class="auth-form-stack" style="margin-top:10px">
-        <div class="sub">To send real emails to any Gmail address, enter your sender Gmail &amp; 16-character Google App Password (or Fast2SMS API key for carrier SMS):</div>
-        <label for="cfgSmtpEmail">
-          Sender Gmail Address
-          <input id="cfgSmtpEmail" type="email" placeholder="yourname@gmail.com">
-        </label>
-        <label for="cfgSmtpPass">
-          Google 16-Char App Password
-          <input id="cfgSmtpPass" type="password" placeholder="xxxx xxxx xxxx xxxx">
-        </label>
-        <label for="cfgSmsKey">
-          Fast2SMS API Key (Optional, for Indian Mobile SMS)
-          <input id="cfgSmsKey" type="password" placeholder="Fast2SMS authorization key">
-        </label>
-        <button type="button" class="secondary" onclick="saveSenderConfig()">💾 Save Live Sender Credentials</button>
-        <div id="cfgSenderStatus" class="sub"></div>
       </div>
-    </details>
+    </div>
+
+    <!-- RIGHT DARK FORM PANEL -->
+    <div class="auth-form-panel">
+
+      <!-- VIEW 0: LOADING / HYDRATING SESSION -->
+      <div id="authViewLoading" class="auth-view" style="text-align:center;padding:40px 0">
+        <div class="auth-spinner"></div>
+        <div style="font-size:15px;font-weight:600;color:#ffffff">Checking your session…</div>
+        <div style="font-size:13px;color:#95b8a6;margin-top:6px">Connecting securely with Supabase Auth</div>
+      </div>
+
+      <!-- VIEW 1: LOG IN (SUPABASE AUTH — PRE-PASSWORD VERIFICATION FOR NEW USERS) -->
+      <div id="authViewLogin" class="auth-view" style="display:none">
+        <h2 id="authModalTitle" class="auth-title">Log in</h2>
+        <p class="auth-subtitle">
+          New to CropSense?
+          <button type="button" class="auth-link" onclick="showAuthView('signup')">Create an account</button>
+        </p>
+
+        <div id="loginAlertBox"></div>
+
+        <form id="loginForm" class="auth-form-stack" onsubmit="submitLogin(event)">
+          <input
+            id="loginIdentifier"
+            class="auth-input"
+            type="text"
+            required
+            placeholder="Email address or 10-digit mobile number"
+            autocomplete="username"
+          >
+
+          <div id="loginPasswordWrap" class="auth-pw-wrap" style="display:none">
+            <input
+              id="loginPassword"
+              class="auth-input has-icon"
+              type="password"
+              minlength="6"
+              placeholder="Enter your password"
+              autocomplete="current-password"
+            >
+            <button
+              type="button"
+              class="auth-pw-toggle"
+              onclick="togglePasswordVisibility('loginPassword', this)"
+              aria-label="Show password"
+              title="Show / hide password"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+
+          <div class="auth-helper-row">
+            <button type="button" id="toggleLoginModeBtn" class="auth-link" onclick="toggleLoginPasswordMode()">
+              Sign in with password instead
+            </button>
+            <button type="button" id="forgotPwLink" class="auth-link" style="display:none" onclick="showAuthView('forgot')">
+              Forgot or set password?
+            </button>
+          </div>
+
+          <button type="submit" id="btnSubmitLogin" class="auth-primary-btn">Continue</button>
+        </form>
+      </div>
+
+      <!-- VIEW 2: CREATE AN ACCOUNT (PRE-PASSWORD VERIFICATION VIA EMAIL OR PHONE) -->
+      <div id="authViewSignup" class="auth-view" style="display:none">
+        <h2 class="auth-title">Create an account</h2>
+        <p class="auth-subtitle">
+          Already have an account?
+          <button type="button" class="auth-link" onclick="showAuthView('login')">Log in</button>
+        </p>
+
+        <div id="signupAlertBox"></div>
+
+        <form id="signupForm" class="auth-form-stack" onsubmit="submitSignup(event)">
+          <div class="auth-row-2">
+            <input
+              id="signupFirstName"
+              class="auth-input"
+              type="text"
+              required
+              minlength="1"
+              placeholder="First name"
+              autocomplete="given-name"
+            >
+            <input
+              id="signupLastName"
+              class="auth-input"
+              type="text"
+              placeholder="Last name"
+              autocomplete="family-name"
+            >
+          </div>
+
+          <input
+            id="signupIdentifier"
+            class="auth-input"
+            type="text"
+            required
+            placeholder="Email address or 10-digit mobile number"
+            autocomplete="email"
+          >
+
+          <label class="auth-terms-row" for="signupTerms">
+            <input id="signupTerms" class="auth-checkbox" type="checkbox" checked required>
+            <span>I agree to the <a href="#" class="auth-link" onclick="showToast('Your CropSense farm records are protected per signed-in user.'); return false;">Terms &amp; Conditions</a></span>
+          </label>
+
+          <button type="submit" id="btnSubmitSignup" class="auth-primary-btn">Create account</button>
+        </form>
+      </div>
+
+      <!-- VIEW 3: OTP VERIFICATION CODE (PASTE-READY EMAIL OR SMS OTP) -->
+      <div id="authViewOtp" class="auth-view" style="display:none">
+        <h2 id="otpStepTitle" class="auth-title">Verify your email</h2>
+        <p id="otpStepSub" class="auth-subtitle">Open the email we sent you, copy the 6-digit OTP code, and paste it below.</p>
+
+        <div id="otpAlertBox"></div>
+        <div id="otpSmsPreview"></div>
+
+        <form id="otpVerifyForm" class="auth-form-stack" onsubmit="submitVerifyOtp(event)">
+          <input id="otpCodeInput" type="hidden" value="">
+          <div id="otpBoxesRow" class="otp-boxes-row" role="group" aria-label="One-time verification code">
+            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1">
+            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 2">
+            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 3">
+            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 4">
+            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 5">
+            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 6">
+          </div>
+
+          <div class="otp-paste-row">
+            <button type="button" class="otp-paste-btn" onclick="pasteOtpFromClipboard()">📋 Paste OTP</button>
+            <button type="button" class="auth-link" style="font-size:12px" onclick="clearOtpBoxes()">Clear</button>
+          </div>
+
+          <button type="submit" id="btnVerifyOtp" class="auth-primary-btn">Verify OTP &amp; Continue</button>
+
+          <div style="display:flex;gap:10px;margin-top:4px">
+            <button type="button" id="btnResendOtp" class="auth-ghost-btn" onclick="resendOtpCode()">Resend OTP</button>
+            <button type="button" class="auth-ghost-btn" onclick="backFromOtp()">← Back</button>
+          </div>
+        </form>
+
+        <details id="otpSupabaseHint" class="otp-template-hint">
+          <summary>Email showing a link instead of a 6-digit OTP?</summary>
+          <div style="margin-top:6px">
+            In your Supabase Dashboard, open <b>Authentication → Email Templates → Magic Link</b> and add
+            <code>Your OTP code is: &lt;strong&gt;{{ .Token }}&lt;/strong&gt;</code> so every login and sign-up email displays the copyable 6-digit OTP.
+          </div>
+        </details>
+      </div>
+
+      <!-- VIEW 4: SET PASSWORD (AFTER PHONE VERIFICATION OR EMAIL RESET) -->
+      <div id="authViewSetPassword" class="auth-view" style="display:none">
+        <div id="setPasswordVerifiedChip" class="auth-verified-chip">✓ Verified</div>
+        <h2 id="setPasswordTitle" class="auth-title">Set your password</h2>
+        <p id="setPasswordSub" class="auth-subtitle">Create a password to finish setting up your CropSense account.</p>
+
+        <div id="setPasswordAlertBox"></div>
+
+        <form id="setPasswordForm" class="auth-form-stack" onsubmit="submitSetPassword(event)">
+          <div id="setPasswordNameWrap" style="display:none">
+            <input
+              id="setPasswordFullName"
+              class="auth-input"
+              type="text"
+              minlength="2"
+              placeholder="Your full name"
+              autocomplete="name"
+            >
+          </div>
+
+          <div class="auth-pw-wrap">
+            <input
+              id="setPasswordInput"
+              class="auth-input has-icon"
+              type="password"
+              required
+              minlength="6"
+              placeholder="Create password (min. 6 characters)"
+              autocomplete="new-password"
+            >
+            <button
+              type="button"
+              class="auth-pw-toggle"
+              onclick="togglePasswordVisibility('setPasswordInput', this)"
+              aria-label="Show password"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+
+          <button type="submit" id="btnSubmitSetPassword" class="auth-primary-btn">Save password &amp; continue</button>
+          <button type="button" class="auth-ghost-btn" onclick="showAuthView('login')">← Back to Log in</button>
+        </form>
+      </div>
+
+      <!-- VIEW 5: FORGOT / SET EMAIL PASSWORD (INSFORGE RESET FLOW) -->
+      <div id="authViewForgot" class="auth-view" style="display:none">
+        <h2 class="auth-title">Set or reset password</h2>
+        <p class="auth-subtitle">
+          Enter your email and we’ll send a 6-digit code to set a new password.
+        </p>
+
+        <div id="forgotAlertBox"></div>
+
+        <form id="forgotForm" class="auth-form-stack" onsubmit="submitForgotEmail(event)">
+          <input
+            id="forgotEmailInput"
+            class="auth-input"
+            type="email"
+            required
+            placeholder="Email address"
+            autocomplete="email"
+          >
+          <button type="submit" id="btnSubmitForgot" class="auth-primary-btn">Send verification code</button>
+          <button type="button" class="auth-ghost-btn" onclick="showAuthView('login')">← Back to Log in</button>
+        </form>
+      </div>
+
+    </div>
   </div>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<script src="js/i18n.js?v=4"></script>
-<script src="js/app.js?v=4"></script>
+<script src="js/i18n.js?v=9"></script>
+<script src="js/app.js?v=9"></script>
 </body>
 </html>

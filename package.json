@@ -1,0 +1,14 @@
+{
+  "name": "smart-crop-advisory-frontend-sdk",
+  "private": true,
+  "description": "Bundles @insforge/sdk for the CropSense vanilla JS frontend",
+  "scripts": {
+    "build:sdk": "esbuild frontend/js/insforge-entry.js --bundle --format=iife --global-name=InsForgeSDK --platform=browser --external:crypto --minify --outfile=frontend/js/insforge-sdk.bundle.js"
+  },
+  "dependencies": {
+    "@insforge/sdk": "latest"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

@@ -25,6 +25,7 @@ import hashlib
 import hmac
 import json
 import os
+from pathlib import Path
 import re
 import secrets
 import smtplib
@@ -183,13 +184,33 @@ def save_sender_settings(
     }
 
 
+def _read_local_env_var(name: str) -> str:
+    val = (os.environ.get(name) or "").strip()
+    if val:
+        return val
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env.local"
+    if env_path.is_file():
+        try:
+            for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                if k.strip() == name:
+                    return v.strip().strip('"').strip("'")
+        except OSError:
+            pass
+    return ""
+
+
 def _deliver_otp(channel: str, destination: str, otp_code: str, full_name: str) -> dict:
     """
-    Attempt real delivery via Gmail SMTP (for email) or Fast2SMS (for phone).
-    Returns delivery status and, if external credentials are not configured yet,
-    provides the simulated OTP notification so local testing works seamlessly.
+    Deliver OTP via live Email SMTP or live SMS Gateway (Twilio / Fast2SMS).
+    Never exposes a simulated OTP preview in production/browser requests;
+    only permits test-mode code return when running under pytest.
     """
     settings = get_sender_settings()["_raw"]
+    in_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
     if channel == "email":
         smtp_user = settings.get("smtp_email", "").strip()
@@ -214,32 +235,53 @@ def _deliver_otp(channel: str, destination: str, otp_code: str, full_name: str) 
                     "delivered_live": True,
                     "channel": "email",
                     "destination": destination,
-                    "delivery_note": f"6-digit verification code sent to your Gmail ({destination}).",
+                    "delivery_note": f"6-digit verification code sent to {destination}.",
                     "demo_otp_code": None,
                 }
             except Exception as exc:
-                return {
-                    "delivered_live": False,
-                    "channel": "email",
-                    "destination": destination,
-                    "delivery_note": (
-                        f"Gmail SMTP error ({exc}). Showing verification code in simulated inbox banner below."
-                    ),
-                    "demo_otp_code": otp_code,
-                }
-        return {
-            "delivered_live": False,
-            "channel": "email",
-            "destination": destination,
-            "delivery_note": (
-                f"6-digit Email verification code generated for {destination} "
-                "(local preview shown below while SMTP is not configured)."
-            ),
-            "demo_otp_code": otp_code,
-        }
+                raise AuthError(f"Could not send email OTP: {exc}", 503) from exc
+        if in_pytest:
+            return {
+                "delivered_live": False,
+                "channel": "email",
+                "destination": destination,
+                "delivery_note": f"Test email OTP generated for {destination}.",
+                "demo_otp_code": otp_code,
+            }
+        raise AuthError("Email OTP is handled via Supabase Auth. Please refresh and try again.", 503)
 
-    # SMS channel
-    sms_key = settings.get("fast2sms_api_key", "").strip()
+    # 1. Live SMS via Twilio (if configured in .env.local / environment)
+    twilio_sid = _read_local_env_var("TWILIO_ACCOUNT_SID")
+    twilio_token = _read_local_env_var("TWILIO_AUTH_TOKEN")
+    twilio_from = _read_local_env_var("TWILIO_FROM_NUMBER")
+    if twilio_sid and twilio_token and twilio_from:
+        try:
+            resp = requests.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Messages.json",
+                auth=(twilio_sid, twilio_token),
+                data={
+                    "To": f"+91{destination}",
+                    "From": twilio_from,
+                    "Body": f"Your CropSense verification OTP is {otp_code}. Valid for {OTP_EXPIRY_MINUTES} minutes.",
+                },
+                timeout=12,
+            )
+            if resp.ok:
+                return {
+                    "delivered_live": True,
+                    "channel": "sms",
+                    "destination": destination,
+                    "delivery_note": f"6-digit SMS OTP sent to +91-{destination}.",
+                    "demo_otp_code": None,
+                }
+            raise AuthError(f"Twilio SMS delivery failed ({resp.status_code}): {resp.text[:160]}", 502)
+        except AuthError:
+            raise
+        except Exception as exc:
+            raise AuthError(f"Could not reach Twilio SMS API: {exc}", 503) from exc
+
+    # 2. Live SMS via Fast2SMS (if configured in .env.local / settings)
+    sms_key = _read_local_env_var("FAST2SMS_API_KEY") or settings.get("fast2sms_api_key", "").strip()
     if sms_key:
         try:
             resp = requests.post(
@@ -247,11 +289,11 @@ def _deliver_otp(channel: str, destination: str, otp_code: str, full_name: str) 
                 headers={"authorization": sms_key},
                 json={
                     "route": "q",
-                    "message": f"Your CropSense 2-Step verification code is {otp_code}. Valid for 10 minutes.",
+                    "message": f"Your CropSense verification OTP is {otp_code}. Valid for {OTP_EXPIRY_MINUTES} minutes.",
                     "language": "english",
                     "numbers": destination,
                 },
-                timeout=10,
+                timeout=12,
             )
             data = resp.json()
             if resp.ok and data.get("return"):
@@ -259,22 +301,30 @@ def _deliver_otp(channel: str, destination: str, otp_code: str, full_name: str) 
                     "delivered_live": True,
                     "channel": "sms",
                     "destination": destination,
-                    "delivery_note": f"6-digit SMS verification code sent to +91-{destination}.",
+                    "delivery_note": f"6-digit SMS OTP sent to +91-{destination}.",
                     "demo_otp_code": None,
                 }
-        except Exception:
-            pass
+            raise AuthError(f"Fast2SMS delivery failed: {data.get('message') or resp.text[:160]}", 502)
+        except AuthError:
+            raise
+        except Exception as exc:
+            raise AuthError(f"Could not reach Fast2SMS API: {exc}", 503) from exc
 
-    return {
-        "delivered_live": False,
-        "channel": "sms",
-        "destination": destination,
-        "delivery_note": (
-            f"6-digit SMS verification code generated for +91-{destination} "
-            "(preview shown below while SMS gateway key is not configured)."
-        ),
-        "demo_otp_code": otp_code,
-    }
+    if in_pytest:
+        return {
+            "delivered_live": False,
+            "channel": "sms",
+            "destination": destination,
+            "delivery_note": f"Test SMS OTP generated for +91-{destination}.",
+            "demo_otp_code": otp_code,
+        }
+
+    raise AuthError(
+        "No live SMS provider is connected yet. To receive real SMS OTPs on your mobile number, "
+        "either enable Phone Auth (Twilio/Vonage) in your Supabase Dashboard, or add "
+        "TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM_NUMBER (or FAST2SMS_API_KEY) in .env.local.",
+        503,
+    )
 
 
 def _issue_otp_challenge(

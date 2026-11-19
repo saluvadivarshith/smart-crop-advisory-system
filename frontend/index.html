@@ -4,11 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>CropSense — Smart Crop Advisory System for Small & Marginal Farmers</title>
+  <script>
+    // Clerk needs a real HTTP origin; file:// cannot complete its trust/verification redirects.
+    if (window.location.protocol === "file:") {
+      window.location.replace("http://127.0.0.1:8000/app/#signin");
+    }
+  </script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/styles.css?v=9">
+  <link rel="stylesheet" href="css/styles.css?v=18">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body.auth-locked {
       margin: 0;
@@ -49,14 +54,19 @@
       </div>
 
       <nav>
+        <div class="nav-group-label">Overview</div>
         <button class="active" data-page="dashboard">📊 <span data-i18n="nav_dashboard">Dashboard</span></button>
         <button data-page="newfarm">🌱 <span data-i18n="nav_newfarm">Start a New Farm</span></button>
+
+        <div class="nav-group-label">Field Diagnostics</div>
         <button data-page="farm">📍 <span data-i18n="nav_farm">Farm Profile & Location</span></button>
         <button data-page="analysis">🍃 <span data-i18n="nav_crop">Crop Leaf Analysis</span></button>
         <button data-page="soil">🧪 <span data-i18n="nav_soil">Soil Health Card</span></button>
         <button data-page="weather">🌦️ <span data-i18n="nav_weather">Farm Weather</span></button>
-        <button data-page="inputs">🛒 <span data-i18n="nav_inputs">Market</span></button>
+
+        <div class="nav-group-label">Advice & Records</div>
         <button data-page="advisory">📋 <span data-i18n="nav_advisory">Smart Advisory</span></button>
+        <button data-page="inputs">🛒 <span data-i18n="nav_inputs">Market & Inputs</span></button>
         <button data-page="history">🗂️ <span data-i18n="nav_history">Assessment History</span></button>
       </nav>
     </div>
@@ -118,28 +128,32 @@
       </div>
 
       <div class="grid">
-        <div class="card metric">
+        <div class="card metric clickable" onclick="switchPage('farm')" title="Open Farm Profile & Location">
           <small data-i18n="dash_metric_crop">Selected Crop & Stage</small>
           <strong id="dashCropMetric">Tomato</strong>
           <span id="dashCropSub" class="sub">Stage: vegetative</span>
+          <span class="metric-link-hint">Set Farm & Crop →</span>
         </div>
 
-        <div class="card metric">
+        <div class="card metric clickable" onclick="switchPage('analysis')" title="Open Crop Leaf Analysis">
           <small data-i18n="dash_metric_disease">Latest Leaf Check</small>
           <strong id="dashDiseaseMetric">Not checked</strong>
           <span id="dashDiseaseSub" class="sub">Upload or click a sample leaf</span>
+          <span class="metric-link-hint">Scan Leaf Photo →</span>
         </div>
 
-        <div class="card metric">
+        <div class="card metric clickable" onclick="switchPage('soil')" title="Open Soil Health Card">
           <small data-i18n="dash_metric_soil">Soil Health Score</small>
           <strong id="dashSoilMetric">No card</strong>
           <div class="bar"><div id="dashSoilBar" class="fill" style="width:0%"></div></div>
+          <span class="metric-link-hint">Enter Soil Card →</span>
         </div>
 
-        <div class="card metric">
+        <div class="card metric clickable" onclick="switchPage('advisory')" title="Open Smart Advisory">
           <small data-i18n="dash_metric_risk">Overall Crop Risk</small>
           <strong id="dashRiskMetric">Not run</strong>
           <div class="bar"><div id="dashRiskBar" class="fill" style="width:0%;background:#b91c1c"></div></div>
+          <span class="metric-link-hint">View Full Advisory →</span>
         </div>
 
         <div class="card w7">
@@ -344,6 +358,11 @@
           <div id="savedFarmsList"></div>
         </div>
       </div>
+
+      <div class="step-next-bar">
+        <span>Done setting up your farm location &amp; land area?</span>
+        <button class="primary" onclick="switchPage('analysis')">Next: Step 2 · Scan Crop Leaf Photo →</button>
+      </div>
     </section>
 
     <!-- 3. CROP LEAF IMAGE ANALYSIS -->
@@ -393,10 +412,11 @@
             </label>
           </div>
 
-          <div class="upload">
-            <strong>Select or take a close-up photo of a single crop leaf</strong>
-            <div class="sub">Accepted formats: JPG, JPEG, PNG (max 10 MB)</div>
-            <input type="file" id="cropImage" accept="image/jpeg,image/png">
+          <div id="leafDropZone" class="upload">
+            <div class="upload-icon">📷</div>
+            <strong>Drag &amp; drop a leaf photo here, or click to browse</strong>
+            <div class="sub">Close-up of a single crop leaf · JPG or PNG (max 10 MB)</div>
+            <input type="file" id="cropImage" accept="image/jpeg,image/png" style="margin-top:12px">
             <div id="imagePreviewWrap" class="preview-wrap">
               <img id="imagePreview" alt="Selected crop leaf preview">
               <div id="imagePreviewMeta" class="sub" style="margin-top:6px"></div>
@@ -427,6 +447,11 @@
           <div class="rec"><div class="dot">2</div><div data-i18n="tip_2">Fill the frame with a single affected leaf showing both spots and green margin.</div></div>
           <div class="rec"><div class="dot">3</div><div data-i18n="tip_3">Hold the phone steady so the leaf veins and spots are sharp, not blurry.</div></div>
         </div>
+      </div>
+
+      <div class="step-next-bar">
+        <span>Leaf checked? Add your Soil Health Card next for a complete advisory.</span>
+        <button class="primary" onclick="switchPage('soil')">Next: Step 3 · Check Soil Nutrients →</button>
       </div>
     </section>
 
@@ -471,6 +496,11 @@
         <div class="card w12" id="soilResultCard" style="display:none">
           <div id="soilResult"></div>
         </div>
+      </div>
+
+      <div class="step-next-bar">
+        <span>Ready to combine Farm Weather, Leaf AI &amp; Soil Health into an action plan?</span>
+        <button class="primary" onclick="runFullAdvisory(true)">Next: Step 4 · Generate Full Smart Advisory →</button>
       </div>
     </section>
 
@@ -630,7 +660,7 @@
           <p>No prior farming knowledge needed: tell us about your land, water, budget, and labour to get a ranked shortlist of suitable crops, a pre-sowing checklist, and government support schemes</p>
         </div>
         <div class="top-actions">
-          <button onclick="runNewFarmWizard()">🔍 Find Best Crops for My Land</button>
+          <button class="primary" onclick="runNewFarmWizard()">🔍 Find Best Crops for My Land</button>
         </div>
       </div>
 
@@ -701,7 +731,7 @@
             </label>
           </div>
           <div class="btn-row" style="margin-top:14px">
-            <button onclick="runNewFarmWizard()">🌱 Generate My New Farm Plan</button>
+            <button class="primary" onclick="runNewFarmWizard()">🌱 Generate My New Farm Plan</button>
             <button class="secondary" onclick="switchPage('farm')">📍 Draw / Measure Plot on Map</button>
             <button class="secondary" onclick="switchPage('soil')">🧪 Enter Soil Health Card</button>
           </div>
@@ -719,7 +749,7 @@
           <p>Plot-scaled fertilizer bags (Urea / DAP / SSP / MOP), organic manure, bio-fertilizers, IPM pest traps, and safe buying checklist</p>
         </div>
         <div class="top-actions">
-          <button onclick="runInputsAdvisor()">🧮 Calculate My Shopping List</button>
+          <button class="primary" onclick="runInputsAdvisor()">🧮 Calculate My Shopping List</button>
         </div>
       </div>
 
@@ -774,7 +804,7 @@
             </label>
           </div>
           <div class="btn-row" style="margin-top:14px">
-            <button onclick="runInputsAdvisor()">🛒 Calculate Fertilizers, IPM & Shopping List</button>
+            <button class="primary" onclick="runInputsAdvisor()">🛒 Calculate Fertilizers, IPM & Shopping List</button>
             <button class="secondary" onclick="fillSampleBagPrices()">💡 Fill Typical Retail Bag Prices</button>
           </div>
         </div>
@@ -846,224 +876,27 @@
       </div>
     </div>
 
-    <!-- RIGHT DARK FORM PANEL -->
+    <!-- RIGHT DARK FORM PANEL (CLERK AUTHENTICATION) -->
     <div class="auth-form-panel">
 
-      <!-- VIEW 0: LOADING / HYDRATING SESSION -->
+      <!-- VIEW 0: LOADING / HYDRATING CLERK SESSION -->
       <div id="authViewLoading" class="auth-view" style="text-align:center;padding:40px 0">
         <div class="auth-spinner"></div>
-        <div style="font-size:15px;font-weight:600;color:#ffffff">Checking your session…</div>
-        <div style="font-size:13px;color:#95b8a6;margin-top:6px">Connecting securely with Supabase Auth</div>
+        <div style="font-size:15px;font-weight:600;color:#ffffff">Loading secure sign-in…</div>
+        <div style="font-size:13px;color:#95b8a6;margin-top:6px">Connecting with Clerk Authentication</div>
       </div>
 
-      <!-- VIEW 1: LOG IN (SUPABASE AUTH — PRE-PASSWORD VERIFICATION FOR NEW USERS) -->
-      <div id="authViewLogin" class="auth-view" style="display:none">
-        <h2 id="authModalTitle" class="auth-title">Log in</h2>
-        <p class="auth-subtitle">
-          New to CropSense?
-          <button type="button" class="auth-link" onclick="showAuthView('signup')">Create an account</button>
-        </p>
+      <!-- VIEW 1: CLERK SIGN IN / SIGN UP -->
+      <div id="authViewClerk" class="auth-view" style="display:none">
+        <div class="clerk-mode-tabs" role="tablist" aria-label="Authentication mode">
+          <button type="button" id="clerkTabSignIn" class="clerk-tab-btn active" onclick="switchClerkAuthMode('signin')">Sign In</button>
+          <button type="button" id="clerkTabSignUp" class="clerk-tab-btn" onclick="switchClerkAuthMode('signup')">Sign Up</button>
+        </div>
 
-        <div id="loginAlertBox"></div>
-
-        <form id="loginForm" class="auth-form-stack" onsubmit="submitLogin(event)">
-          <input
-            id="loginIdentifier"
-            class="auth-input"
-            type="text"
-            required
-            placeholder="Email address or 10-digit mobile number"
-            autocomplete="username"
-          >
-
-          <div id="loginPasswordWrap" class="auth-pw-wrap" style="display:none">
-            <input
-              id="loginPassword"
-              class="auth-input has-icon"
-              type="password"
-              minlength="6"
-              placeholder="Enter your password"
-              autocomplete="current-password"
-            >
-            <button
-              type="button"
-              class="auth-pw-toggle"
-              onclick="togglePasswordVisibility('loginPassword', this)"
-              aria-label="Show password"
-              title="Show / hide password"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            </button>
-          </div>
-
-          <div class="auth-helper-row">
-            <button type="button" id="toggleLoginModeBtn" class="auth-link" onclick="toggleLoginPasswordMode()">
-              Sign in with password instead
-            </button>
-            <button type="button" id="forgotPwLink" class="auth-link" style="display:none" onclick="showAuthView('forgot')">
-              Forgot or set password?
-            </button>
-          </div>
-
-          <button type="submit" id="btnSubmitLogin" class="auth-primary-btn">Continue</button>
-        </form>
-      </div>
-
-      <!-- VIEW 2: CREATE AN ACCOUNT (PRE-PASSWORD VERIFICATION VIA EMAIL OR PHONE) -->
-      <div id="authViewSignup" class="auth-view" style="display:none">
-        <h2 class="auth-title">Create an account</h2>
-        <p class="auth-subtitle">
-          Already have an account?
-          <button type="button" class="auth-link" onclick="showAuthView('login')">Log in</button>
-        </p>
-
-        <div id="signupAlertBox"></div>
-
-        <form id="signupForm" class="auth-form-stack" onsubmit="submitSignup(event)">
-          <div class="auth-row-2">
-            <input
-              id="signupFirstName"
-              class="auth-input"
-              type="text"
-              required
-              minlength="1"
-              placeholder="First name"
-              autocomplete="given-name"
-            >
-            <input
-              id="signupLastName"
-              class="auth-input"
-              type="text"
-              placeholder="Last name"
-              autocomplete="family-name"
-            >
-          </div>
-
-          <input
-            id="signupIdentifier"
-            class="auth-input"
-            type="text"
-            required
-            placeholder="Email address or 10-digit mobile number"
-            autocomplete="email"
-          >
-
-          <label class="auth-terms-row" for="signupTerms">
-            <input id="signupTerms" class="auth-checkbox" type="checkbox" checked required>
-            <span>I agree to the <a href="#" class="auth-link" onclick="showToast('Your CropSense farm records are protected per signed-in user.'); return false;">Terms &amp; Conditions</a></span>
-          </label>
-
-          <button type="submit" id="btnSubmitSignup" class="auth-primary-btn">Create account</button>
-        </form>
-      </div>
-
-      <!-- VIEW 3: OTP VERIFICATION CODE (PASTE-READY EMAIL OR SMS OTP) -->
-      <div id="authViewOtp" class="auth-view" style="display:none">
-        <h2 id="otpStepTitle" class="auth-title">Verify your email</h2>
-        <p id="otpStepSub" class="auth-subtitle">Open the email we sent you, copy the 6-digit OTP code, and paste it below.</p>
-
-        <div id="otpAlertBox"></div>
-        <div id="otpSmsPreview"></div>
-
-        <form id="otpVerifyForm" class="auth-form-stack" onsubmit="submitVerifyOtp(event)">
-          <input id="otpCodeInput" type="hidden" value="">
-          <div id="otpBoxesRow" class="otp-boxes-row" role="group" aria-label="One-time verification code">
-            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1">
-            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 2">
-            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 3">
-            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 4">
-            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 5">
-            <input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 6">
-          </div>
-
-          <div class="otp-paste-row">
-            <button type="button" class="otp-paste-btn" onclick="pasteOtpFromClipboard()">📋 Paste OTP</button>
-            <button type="button" class="auth-link" style="font-size:12px" onclick="clearOtpBoxes()">Clear</button>
-          </div>
-
-          <button type="submit" id="btnVerifyOtp" class="auth-primary-btn">Verify OTP &amp; Continue</button>
-
-          <div style="display:flex;gap:10px;margin-top:4px">
-            <button type="button" id="btnResendOtp" class="auth-ghost-btn" onclick="resendOtpCode()">Resend OTP</button>
-            <button type="button" class="auth-ghost-btn" onclick="backFromOtp()">← Back</button>
-          </div>
-        </form>
-
-        <details id="otpSupabaseHint" class="otp-template-hint">
-          <summary>Email showing a link instead of a 6-digit OTP?</summary>
-          <div style="margin-top:6px">
-            In your Supabase Dashboard, open <b>Authentication → Email Templates → Magic Link</b> and add
-            <code>Your OTP code is: &lt;strong&gt;{{ .Token }}&lt;/strong&gt;</code> so every login and sign-up email displays the copyable 6-digit OTP.
-          </div>
-        </details>
-      </div>
-
-      <!-- VIEW 4: SET PASSWORD (AFTER PHONE VERIFICATION OR EMAIL RESET) -->
-      <div id="authViewSetPassword" class="auth-view" style="display:none">
-        <div id="setPasswordVerifiedChip" class="auth-verified-chip">✓ Verified</div>
-        <h2 id="setPasswordTitle" class="auth-title">Set your password</h2>
-        <p id="setPasswordSub" class="auth-subtitle">Create a password to finish setting up your CropSense account.</p>
-
-        <div id="setPasswordAlertBox"></div>
-
-        <form id="setPasswordForm" class="auth-form-stack" onsubmit="submitSetPassword(event)">
-          <div id="setPasswordNameWrap" style="display:none">
-            <input
-              id="setPasswordFullName"
-              class="auth-input"
-              type="text"
-              minlength="2"
-              placeholder="Your full name"
-              autocomplete="name"
-            >
-          </div>
-
-          <div class="auth-pw-wrap">
-            <input
-              id="setPasswordInput"
-              class="auth-input has-icon"
-              type="password"
-              required
-              minlength="6"
-              placeholder="Create password (min. 6 characters)"
-              autocomplete="new-password"
-            >
-            <button
-              type="button"
-              class="auth-pw-toggle"
-              onclick="togglePasswordVisibility('setPasswordInput', this)"
-              aria-label="Show password"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            </button>
-          </div>
-
-          <button type="submit" id="btnSubmitSetPassword" class="auth-primary-btn">Save password &amp; continue</button>
-          <button type="button" class="auth-ghost-btn" onclick="showAuthView('login')">← Back to Log in</button>
-        </form>
-      </div>
-
-      <!-- VIEW 5: FORGOT / SET EMAIL PASSWORD (INSFORGE RESET FLOW) -->
-      <div id="authViewForgot" class="auth-view" style="display:none">
-        <h2 class="auth-title">Set or reset password</h2>
-        <p class="auth-subtitle">
-          Enter your email and we’ll send a 6-digit code to set a new password.
-        </p>
-
-        <div id="forgotAlertBox"></div>
-
-        <form id="forgotForm" class="auth-form-stack" onsubmit="submitForgotEmail(event)">
-          <input
-            id="forgotEmailInput"
-            class="auth-input"
-            type="email"
-            required
-            placeholder="Email address"
-            autocomplete="email"
-          >
-          <button type="submit" id="btnSubmitForgot" class="auth-primary-btn">Send verification code</button>
-          <button type="button" class="auth-ghost-btn" onclick="showAuthView('login')">← Back to Log in</button>
-        </form>
+        <div id="clerkAlertBox"></div>
+        <div id="clerk-captcha"></div>
+        <div id="clerkSignInMount" class="clerk-mount-slot"></div>
+        <div id="clerkSignUpMount" class="clerk-mount-slot" style="display:none"></div>
       </div>
 
     </div>
@@ -1072,7 +905,7 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<script src="js/i18n.js?v=9"></script>
-<script src="js/app.js?v=9"></script>
+<script src="js/i18n.js?v=18"></script>
+<script src="js/app.js?v=20"></script>
 </body>
 </html>

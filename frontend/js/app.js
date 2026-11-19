@@ -11,8 +11,8 @@ const API_BASE =
 const state = {
   currentUser: null,
   authToken: null,
-  authProvider: null, // "supabase" | "local_phone" | null
-  supabaseConfig: null,
+  authProvider: null, // "clerk" | null
+  clerkConfig: null,
   farms: [],
   activeFarm: null,
   cropResult: null,
@@ -91,12 +91,15 @@ function escapeHtml(str) {
 }
 
 function switchPage(pageId) {
+  state.activePage = pageId;
   document.querySelectorAll("nav button").forEach((b) => {
     b.classList.toggle("active", b.dataset.page === pageId);
   });
   document.querySelectorAll(".page").forEach((p) => {
     p.classList.toggle("active", p.id === pageId);
   });
+  updateJourneyStrip(pageId);
+  window.scrollTo({ top: 0, behavior: "smooth" });
   if (pageId === "farm") {
     initFarmMap();
     setTimeout(() => {
@@ -158,10 +161,32 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Build Soil Health Card fields (blank by default so no fake values are submitted)
   renderSoilInputs();
 
-  // Image preview listener
+  // Image preview listener + tactile Drag & Drop zone
   const cropInput = document.getElementById("cropImage");
   if (cropInput) {
     cropInput.addEventListener("change", handleImagePreview);
+  }
+  const dropZone = document.getElementById("leafDropZone");
+  if (dropZone && cropInput) {
+    ["dragenter", "dragover"].forEach((evt) => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropZone.classList.add("drag-over");
+      });
+    });
+    ["dragleave", "drop"].forEach((evt) => {
+      dropZone.addEventListener(evt, (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("drag-over");
+      });
+    });
+    dropZone.addEventListener("drop", (e) => {
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) {
+        cropInput.files = files;
+        cropInput.dispatchEvent(new Event("change"));
+      }
+    });
   }
 
   // Sync crop select across pages
@@ -185,7 +210,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 // -------------------------
-// Mandatory Split-Screen Farmer Auth Portal (InsForge Auth + Google OAuth + Pre-Password Verification)
+// Mandatory Split-Screen Farmer Auth Portal (Clerk Authentication)
 // -------------------------
 
 const AUTH_HERO_SLIDES = [
@@ -195,9 +220,75 @@ const AUTH_HERO_SLIDES = [
 ];
 let authHeroSlideIdx = 0;
 let authHeroTimer = null;
-let loginUsePassword = false;
-let otpContext = null;
-let setPasswordContext = null;
+let activeClerkMode = "signin";
+let clerkSignInMounted = false;
+let clerkSignUpMounted = false;
+let clerkUserButtonMounted = false;
+let clerkFinalizationInProgress = false;
+let authRecoveryInProgress = false;
+
+const CLERK_GREEN_APPEARANCE = {
+  variables: {
+    colorPrimary: "#40916c",
+    colorPrimaryForeground: "#ffffff",
+    colorBackground: "#13241c",
+    colorInputBackground: "#1c3329",
+    colorInputText: "#ffffff",
+    colorText: "#f0faf4",
+    colorTextSecondary: "#95b8a6",
+    colorNeutral: "#b7e4c7",
+    colorDanger: "#f87171",
+    borderRadius: "10px",
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif",
+  },
+  elements: {
+    card: {
+      backgroundColor: "transparent",
+      boxShadow: "none",
+      border: "none",
+    },
+    headerTitle: {
+      color: "#ffffff",
+      fontSize: "24px",
+      fontWeight: "600",
+    },
+    headerSubtitle: {
+      color: "#95b8a6",
+    },
+    formButtonPrimary: {
+      background: "linear-gradient(135deg, #2d6a4f 0%, #40916c 100%)",
+      color: "#ffffff",
+      fontWeight: "600",
+      borderRadius: "9px",
+      boxShadow: "0 6px 18px rgba(45, 106, 79, 0.35)",
+    },
+    formFieldInput: {
+      backgroundColor: "#1c3329",
+      borderColor: "#2b4c3d",
+      color: "#ffffff",
+    },
+    formFieldLabel: {
+      color: "#c2ddd0",
+    },
+    footerActionLink: {
+      color: "#74c69d",
+    },
+    socialButtonsBlockButton: {
+      backgroundColor: "#1c3329",
+      borderColor: "#315343",
+      color: "#f0faf4",
+    },
+    dividerLine: {
+      backgroundColor: "#284638",
+    },
+    dividerText: {
+      color: "#7ea391",
+    },
+    footer: {
+      background: "transparent",
+    },
+  },
+};
 
 function formatShortId(id) {
   if (id === null || id === undefined) return "#—";
@@ -223,129 +314,36 @@ function startAuthHeroCarousel() {
   }, 5500);
 }
 
-window.togglePasswordVisibility = function (inputId, btn) {
-  const input = document.getElementById(inputId);
-  if (!input) return;
-  const showing = input.type === "text";
-  input.type = showing ? "password" : "text";
-  if (btn) btn.setAttribute("aria-label", showing ? "Show password" : "Hide password");
-};
-
-function setAuthAlert(boxId, message, type = "error", extraHtml = "") {
-  const el = document.getElementById(boxId);
+function setClerkAlert(message, type = "error") {
+  const el = document.getElementById("clerkAlertBox");
   if (!el) return;
-  if (!message && !extraHtml) {
+  if (!message) {
     el.innerHTML = "";
     return;
   }
-  el.innerHTML = `<div class="auth-msg ${type}">${escapeHtml(message)}${extraHtml}</div>`;
+  el.innerHTML = `<div class="auth-msg ${type}">${escapeHtml(message)}</div>`;
 }
 
-function clearAllAuthAlerts() {
-  ["loginAlertBox", "signupAlertBox", "otpAlertBox", "setPasswordAlertBox", "forgotAlertBox"].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = "";
-  });
-}
+function normalizeClerkUser(clerkUser) {
+  const primaryEmail =
+    (clerkUser && clerkUser.primaryEmailAddress && clerkUser.primaryEmailAddress.emailAddress) ||
+    (clerkUser && clerkUser.emailAddresses && clerkUser.emailAddresses[0] && clerkUser.emailAddresses[0].emailAddress) ||
+    null;
+  const primaryPhone =
+    (clerkUser && clerkUser.primaryPhoneNumber && clerkUser.primaryPhoneNumber.phoneNumber) ||
+    (clerkUser && clerkUser.phoneNumbers && clerkUser.phoneNumbers[0] && clerkUser.phoneNumbers[0].phoneNumber) ||
+    null;
+  const fullName =
+    (clerkUser && clerkUser.fullName) ||
+    [clerkUser && clerkUser.firstName, clerkUser && clerkUser.lastName].filter(Boolean).join(" ").trim() ||
+    (clerkUser && clerkUser.username) ||
+    (primaryEmail ? primaryEmail.split("@")[0] : "Farmer");
 
-window.showAuthView = function (viewName) {
-  clearAllAuthAlerts();
-  const map = {
-    loading: "authViewLoading",
-    login: "authViewLogin",
-    signup: "authViewSignup",
-    otp: "authViewOtp",
-    setPassword: "authViewSetPassword",
-    forgot: "authViewForgot",
-  };
-  Object.values(map).forEach((elId) => {
-    const el = document.getElementById(elId);
-    if (el) el.style.display = "none";
-  });
-  const active = document.getElementById(map[viewName] || "authViewLogin");
-  if (active) active.style.display = "flex";
-
-  if (viewName === "login") {
-    const idEl = document.getElementById("loginIdentifier");
-    if (idEl && !idEl.value) idEl.focus();
-  } else if (viewName === "signup") {
-    const fnEl = document.getElementById("signupFirstName");
-    if (fnEl && !fnEl.value) fnEl.focus();
-  } else if (viewName === "otp") {
-    clearOtpBoxes();
-    setTimeout(() => {
-      const firstBox = document.querySelector("#otpBoxesRow .otp-digit-box");
-      if (firstBox) firstBox.focus();
-    }, 40);
-  } else if (viewName === "setPassword") {
-    const pwEl = document.getElementById("setPasswordInput");
-    if (pwEl) {
-      pwEl.value = "";
-      setTimeout(() => pwEl.focus(), 40);
-    }
-  }
-};
-
-function setLoginPasswordMode(usePassword) {
-  loginUsePassword = Boolean(usePassword);
-  const pwWrap = document.getElementById("loginPasswordWrap");
-  const pwInput = document.getElementById("loginPassword");
-  const toggleBtn = document.getElementById("toggleLoginModeBtn");
-  const forgotBtn = document.getElementById("forgotPwLink");
-  const submitBtn = document.getElementById("btnSubmitLogin");
-
-  if (pwWrap) pwWrap.style.display = loginUsePassword ? "flex" : "none";
-  if (pwInput) {
-    pwInput.required = loginUsePassword;
-    if (!loginUsePassword) pwInput.value = "";
-  }
-  if (toggleBtn) {
-    toggleBtn.textContent = loginUsePassword ? "Use 6-digit verification code instead" : "Sign in with password instead";
-  }
-  if (forgotBtn) forgotBtn.style.display = loginUsePassword ? "inline" : "none";
-  if (submitBtn) submitBtn.textContent = loginUsePassword ? "Log in" : "Continue";
-}
-
-window.toggleLoginPasswordMode = function () {
-  setAuthAlert("loginAlertBox", "");
-  setLoginPasswordMode(!loginUsePassword);
-  if (loginUsePassword) {
-    const pwEl = document.getElementById("loginPassword");
-    if (pwEl) pwEl.focus();
-  }
-};
-
-function classifyIdentifier(raw) {
-  const val = (raw || "").trim();
-  if (!val) {
-    throw new Error("Please enter your email address or 10-digit mobile number.");
-  }
-  if (val.includes("@")) {
-    const lower = val.toLowerCase();
-    if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(lower)) {
-      throw new Error("Please enter a valid email address (for example, farmer@gmail.com).");
-    }
-    return { type: "email", value: lower };
-  }
-  let digits = val.replace(/\D/g, "");
-  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
-  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
-  if (digits.length === 10 && /^[6-9]/.test(digits)) {
-    return { type: "phone", value: digits };
-  }
-  throw new Error("Please enter a valid email address or 10-digit Indian mobile number.");
-}
-
-function normalizeSupabaseUser(sbUser) {
-  const email = sbUser?.email || null;
-  const meta = sbUser?.user_metadata || {};
-  const profileName = meta.full_name || meta.name || "";
-  const fallbackName = email ? email.split("@")[0] : "Farmer";
   return {
-    id: String(sbUser?.id || ""),
-    full_name: String(profileName).trim() || fallbackName,
-    email,
-    phone: sbUser?.phone || null,
+    id: String((clerkUser && clerkUser.id) || ""),
+    full_name: fullName,
+    email: primaryEmail,
+    phone: primaryPhone,
   };
 }
 
@@ -359,14 +357,14 @@ function authHeaders(extra = {}) {
 
 async function authHeadersAsync(extra = {}) {
   const h = { ...extra };
-  if (state.authProvider === "supabase" && window.supabaseClient) {
+  if (window.clerk && window.clerk.session) {
     try {
-      const { data } = await window.supabaseClient.auth.getSession();
-      if (data && data.session && data.session.access_token) {
-        state.authToken = data.session.access_token;
+      const fresh = await window.clerk.session.getToken();
+      if (fresh) {
+        state.authToken = fresh;
       }
     } catch (err) {
-      console.warn("Could not refresh Supabase session:", err);
+      console.warn("Could not refresh Clerk session token:", err);
     }
   }
   if (state.authToken) {
@@ -375,19 +373,30 @@ async function authHeadersAsync(extra = {}) {
   return h;
 }
 
-function handleUnauthorizedResponse(resp) {
-  if (resp && resp.status === 401) {
-    state.authToken = null;
-    state.currentUser = null;
-    state.authProvider = null;
-    sessionStorage.removeItem("cropsense_phone_token");
-    syncAuthLockState();
-    renderAuthSidebar();
-    window.showAuthView("login");
-    showToast("Your session expired. Please log in again.");
-    return true;
+async function handleUnauthorizedResponse(resp) {
+  if (!resp || resp.status !== 401) return false;
+  if (authRecoveryInProgress) return true;
+
+  authRecoveryInProgress = true;
+  state.authToken = null;
+  state.currentUser = null;
+  state.authProvider = null;
+  syncAuthLockState();
+  renderAuthSidebar();
+  showToast("Your session expired. Please sign in again.");
+
+  try {
+    if (window.clerk && (window.clerk.session || window.clerk.user)) {
+      const appUrl = `${window.location.origin}${window.location.pathname}#signin`;
+      await window.clerk.signOut({ redirectUrl: appUrl });
+    }
+  } catch (err) {
+    console.warn("Could not clear the rejected Clerk session:", err);
+  } finally {
+    authRecoveryInProgress = false;
+    mountClerkAuthWidget("signin");
   }
-  return false;
+  return true;
 }
 
 function syncAuthLockState() {
@@ -404,118 +413,215 @@ function syncAuthLockState() {
   }
 }
 
+function unmountClerkAuthWidget() {
+  if (!window.clerk) return;
+  const signInEl = document.getElementById("clerkSignInMount");
+  const signUpEl = document.getElementById("clerkSignUpMount");
+  if (signInEl && clerkSignInMounted) {
+    try {
+      window.clerk.unmountSignIn(signInEl);
+    } catch (e) {}
+    clerkSignInMounted = false;
+  }
+  if (signUpEl && clerkSignUpMounted) {
+    try {
+      window.clerk.unmountSignUp(signUpEl);
+    } catch (e) {}
+    clerkSignUpMounted = false;
+  }
+}
+
+function mountClerkAuthWidget(mode = "signin") {
+  activeClerkMode = mode === "signup" ? "signup" : "signin";
+  const loadView = document.getElementById("authViewLoading");
+  const clerkView = document.getElementById("authViewClerk");
+  const tabIn = document.getElementById("clerkTabSignIn");
+  const tabUp = document.getElementById("clerkTabSignUp");
+  const signInEl = document.getElementById("clerkSignInMount");
+  const signUpEl = document.getElementById("clerkSignUpMount");
+
+  if (loadView) loadView.style.display = "none";
+  if (clerkView) clerkView.style.display = "flex";
+  if (tabIn) tabIn.classList.toggle("active", activeClerkMode === "signin");
+  if (tabUp) tabUp.classList.toggle("active", activeClerkMode === "signup");
+
+  if (signInEl) signInEl.style.display = activeClerkMode === "signin" ? "flex" : "none";
+  if (signUpEl) signUpEl.style.display = activeClerkMode === "signup" ? "flex" : "none";
+
+  if (!window.clerk) {
+    setClerkAlert("Secure sign-in is still loading. Please wait a moment or refresh this page.");
+    return;
+  }
+
+  const appUrl = `${window.location.origin}${window.location.pathname}`;
+  const commonProps = {
+    routing: "virtual",
+    appearance: CLERK_GREEN_APPEARANCE,
+    signInUrl: `${appUrl}#signin`,
+    signUpUrl: `${appUrl}#signup`,
+    fallbackRedirectUrl: appUrl,
+    forceRedirectUrl: appUrl,
+  };
+
+  try {
+    if (activeClerkMode === "signup") {
+      if (signUpEl && !clerkSignUpMounted) {
+        window.clerk.mountSignUp(signUpEl, commonProps);
+        clerkSignUpMounted = true;
+      }
+    } else if (signInEl && !clerkSignInMounted) {
+      window.clerk.mountSignIn(signInEl, commonProps);
+      clerkSignInMounted = true;
+    }
+    setClerkAlert("");
+  } catch (err) {
+    console.error("Could not mount Clerk authentication form:", err);
+    setClerkAlert("The sign-in form could not load. Check your connection and refresh the page.");
+  }
+}
+
+window.addEventListener("hashchange", () => {
+  if (!document.body.classList.contains("auth-locked") || !window.clerk) return;
+  if (window.location.hash === "#signup" && activeClerkMode !== "signup") {
+    mountClerkAuthWidget("signup");
+  } else if (window.location.hash === "#signin" && activeClerkMode !== "signin") {
+    mountClerkAuthWidget("signin");
+  }
+});
+
+window.switchClerkAuthMode = function (mode) {
+  setClerkAlert("");
+  mountClerkAuthWidget(mode);
+};
+
+function injectExternalScript(id, src, attrs = {}) {
+  return new Promise((resolve, reject) => {
+    const existing = document.getElementById(id);
+    if (existing) existing.remove();
+    const script = document.createElement("script");
+    script.id = id;
+    script.async = true;
+    script.crossOrigin = "anonymous";
+    Object.entries(attrs).forEach(([k, v]) => script.setAttribute(k, v));
+    script.src = src;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Could not load Clerk script: ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+async function loadClerkBrowserScript(frontendApi, publishableKey) {
+  const base = frontendApi.replace(/\/$/, "");
+  // 1. Load @clerk/ui v1 browser bundle (registers window.__internal_ClerkUICtor for Clerk v6)
+  if (!window.__internal_ClerkUICtor) {
+    await injectExternalScript("clerk-ui-script", `${base}/npm/@clerk/ui@1/dist/ui.browser.js`);
+  }
+  // 2. Load @clerk/clerk-js v6 browser bundle
+  if (!window.Clerk || typeof window.Clerk.load !== "function") {
+    await injectExternalScript("clerk-browser-script", `${base}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, {
+      "data-clerk-publishable-key": publishableKey,
+    });
+  }
+  if (!window.Clerk || typeof window.Clerk.load !== "function") {
+    throw new Error("Clerk v6 script loaded, but window.Clerk was not initialized.");
+  }
+  return window.Clerk;
+}
+
 async function initAuthPortal() {
   startAuthHeroCarousel();
-  window.showAuthView("loading");
+  const loadView = document.getElementById("authViewLoading");
+  const clerkView = document.getElementById("authViewClerk");
+  if (loadView) loadView.style.display = "flex";
+  if (clerkView) clerkView.style.display = "none";
 
-  // 1. Load public Supabase Auth config (URL + publishable key) from backend (.env.local)
   try {
-    const cfgResp = await fetch(`${API_BASE}/api/config/supabase`);
-    if (cfgResp.ok) {
-      const cfg = await cfgResp.json();
-      state.supabaseConfig = cfg;
-      if (cfg.configured && cfg.url && cfg.publishableKey && window.supabase && typeof window.supabase.createClient === "function") {
-        window.supabaseClient = window.supabase.createClient(cfg.url, cfg.publishableKey);
-
-        window.supabaseClient.auth.onAuthStateChange(async (event, session) => {
-          if (event === "PASSWORD_RECOVERY" && session && session.user) {
-            setPasswordContext = {
-              kind: "supabase_set_password",
-              destination: session.user.email || "",
-              fullName: (session.user.user_metadata && session.user.user_metadata.full_name) || "",
-              session,
-            };
-            document.getElementById("setPasswordVerifiedChip").textContent = `✓ Verified ${session.user.email || "email"}`;
-            document.getElementById("setPasswordTitle").textContent = "Set your new password";
-            document.getElementById("setPasswordSub").textContent = "Choose a strong password (at least 6 characters) for your CropSense account.";
-            document.getElementById("setPasswordNameWrap").style.display = "none";
-            document.getElementById("setPasswordFullName").required = false;
-            window.showAuthView("setPassword");
-            return;
-          }
-          if (event === "TOKEN_REFRESHED" && session && session.access_token) {
-            state.authToken = session.access_token;
-          }
-        });
-      }
+    const cfgResp = await fetch(`${API_BASE}/api/config/clerk`);
+    if (!cfgResp.ok) {
+      throw new Error("Could not fetch Clerk configuration from server.");
     }
-  } catch (err) {
-    console.warn("Could not initialize Supabase client:", err);
-  }
+    const cfg = await cfgResp.json();
+    state.clerkConfig = cfg;
 
-  // 2. Hydrate active Supabase Auth session (including confirmation/magic-link return)
-  if (window.supabaseClient) {
-    try {
-      const { data } = await window.supabaseClient.auth.getSession();
-      if (data && data.session && data.session.user && data.session.access_token) {
-        await finalizeSupabaseSignIn(data.session, null);
+    if (!cfg.configured || !cfg.publishableKey || !cfg.frontendApi) {
+      throw new Error("Clerk publishable key is missing. Run 'npx -y clerk@latest env pull' and restart the server.");
+    }
+
+    const appUrl = `${window.location.origin}${window.location.pathname}`;
+    const clerk = await loadClerkBrowserScript(cfg.frontendApi, cfg.publishableKey);
+    window.clerk = clerk;
+    await clerk.load({
+      ...(window.__internal_ClerkUICtor ? { ui: { ClerkUI: window.__internal_ClerkUICtor } } : {}),
+      appearance: CLERK_GREEN_APPEARANCE,
+      signInUrl: `${appUrl}#signin`,
+      signUpUrl: `${appUrl}#signup`,
+      signInFallbackRedirectUrl: appUrl,
+      signUpFallbackRedirectUrl: appUrl,
+      afterSignOutUrl: appUrl,
+    });
+
+    // Keep CropSense lock state & sidebar synchronized with Clerk auth state
+    clerk.addListener(async ({ user, session }) => {
+      if (user && session) {
+        const token = await session.getToken().catch(() => null);
+        if (token) {
+          const isNewSignIn = !state.currentUser || state.currentUser.id !== String(user.id);
+          await finalizeClerkSignIn(user, token, isNewSignIn ? `Welcome, ${normalizeClerkUser(user).full_name}!` : null);
+        }
+      } else if (state.currentUser) {
+        clearSignedOutState(false);
+        mountClerkAuthWidget("signin");
+      }
+    });
+
+    if (clerk.user && clerk.session) {
+      const token = await clerk.session.getToken();
+      if (token) {
+        await finalizeClerkSignIn(clerk.user, token, null);
         return;
       }
-    } catch (err) {
-      console.warn("Supabase session hydration skipped:", err);
     }
-  }
 
-  // 3. Check if a phone-only session exists in this browser tab
-  const savedPhoneToken = sessionStorage.getItem("cropsense_phone_token");
-  if (savedPhoneToken) {
-    try {
-      const meResp = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${savedPhoneToken}` },
-      });
-      if (meResp.ok) {
-        const meData = await meResp.json();
-        if (meData.authenticated && meData.user) {
-          await finalizeLocalPhoneSignIn(meData.user, savedPhoneToken, null);
-          return;
-        }
-      }
-    } catch (err) {
-      // ignore
-    }
-    sessionStorage.removeItem("cropsense_phone_token");
+    state.currentUser = null;
+    state.authToken = null;
+    state.authProvider = null;
+    syncAuthLockState();
+    renderAuthSidebar();
+    mountClerkAuthWidget("signin");
+  } catch (err) {
+    console.error("Clerk initialization error:", err);
+    if (loadView) loadView.style.display = "none";
+    if (clerkView) clerkView.style.display = "flex";
+    setClerkAlert(err.message || "Could not initialize Clerk authentication.");
   }
-
-  // 4. Not signed in -> keep app strictly locked and show Log in screen
-  state.currentUser = null;
-  state.authToken = null;
-  state.authProvider = null;
-  syncAuthLockState();
-  renderAuthSidebar();
-  setLoginPasswordMode(false);
-  window.showAuthView("login");
 }
 
-async function finalizeSupabaseSignIn(session, toastMsg) {
-  if (!session || !session.user || !session.access_token) return;
-  state.authProvider = "supabase";
-  state.authToken = session.access_token;
-  state.currentUser = normalizeSupabaseUser(session.user);
-  otpContext = null;
-  setPasswordContext = null;
+async function finalizeClerkSignIn(clerkUser, token, toastMsg) {
+  const normalizedUser = normalizeClerkUser(clerkUser);
+  if (clerkFinalizationInProgress) return;
+  if (state.authProvider === "clerk" && state.currentUser && state.currentUser.id === normalizedUser.id) {
+    state.authToken = token;
+    return;
+  }
 
-  syncAuthLockState();
-  renderAuthSidebar();
-  await loadFarms();
-  await loadHistory();
-  updateDashboardView();
-  if (toastMsg) showToast(toastMsg);
-}
+  clerkFinalizationInProgress = true;
+  try {
+    unmountClerkAuthWidget();
+    state.authProvider = "clerk";
+    state.authToken = token;
+    state.currentUser = normalizedUser;
 
-async function finalizeLocalPhoneSignIn(userObj, token, toastMsg) {
-  state.authProvider = "local_phone";
-  state.authToken = token;
-  state.currentUser = userObj;
-  sessionStorage.setItem("cropsense_phone_token", token);
-  otpContext = null;
-  setPasswordContext = null;
-
-  syncAuthLockState();
-  renderAuthSidebar();
-  await loadFarms();
-  await loadHistory();
-  updateDashboardView();
-  if (toastMsg) showToast(toastMsg);
+    syncAuthLockState();
+    renderAuthSidebar();
+    await loadFarms();
+    if (state.authProvider !== "clerk" || !state.currentUser || state.currentUser.id !== normalizedUser.id) return;
+    await loadHistory();
+    if (state.authProvider !== "clerk" || !state.currentUser || state.currentUser.id !== normalizedUser.id) return;
+    updateDashboardView();
+    if (toastMsg) showToast(toastMsg);
+  } finally {
+    clerkFinalizationInProgress = false;
+  }
 }
 
 function renderAuthSidebar() {
@@ -523,28 +629,44 @@ function renderAuthSidebar() {
   if (!box) return;
   if (state.currentUser) {
     const u = state.currentUser;
-    const contactParts = [u.email ? `✉️ ${u.email}` : null, u.phone ? `📱 +91-${u.phone}` : null]
-      .filter(Boolean)
-      .join(" · ");
-    const providerBadge = state.authProvider === "supabase" ? " · Supabase Auth" : "";
+    const contact = u.email || u.phone || "Signed in with Clerk";
     box.innerHTML = `
-      <div class="auth-user-name">👨‍🌾 ${escapeHtml(u.full_name || "Farmer")}</div>
-      <div class="auth-user-contact">${escapeHtml(contactParts)}${escapeHtml(providerBadge)}</div>
+      <div class="clerk-sidebar-row">
+        <div id="clerkUserButtonSlot"></div>
+        <div class="clerk-sidebar-meta">
+          <div class="auth-user-name">${escapeHtml(u.full_name || "Farmer")}</div>
+          <div class="auth-user-contact" title="${escapeHtml(contact)}">${escapeHtml(contact)}</div>
+        </div>
+      </div>
       <button class="auth-btn-small logout" onclick="logoutFarmer()">Sign Out</button>
     `;
+    const slot = document.getElementById("clerkUserButtonSlot");
+    if (slot && window.clerk) {
+      try {
+        window.clerk.mountUserButton(slot, {
+          appearance: {
+            variables: { colorPrimary: "#40916c" },
+          },
+        });
+        clerkUserButtonMounted = true;
+      } catch (err) {
+        console.warn("Could not mount Clerk UserButton:", err);
+      }
+    }
   } else {
+    clerkUserButtonMounted = false;
     box.innerHTML = `
       <div class="auth-user-name">👤 Not Signed In</div>
       <div class="auth-user-contact">Sign in to access your farm records</div>
-      <button class="auth-btn-small" onclick="openAuthModal('login')">Sign In</button>
+      <button class="auth-btn-small" onclick="openAuthModal('signin')">Sign In</button>
     `;
   }
 }
 
-window.openAuthModal = function (view = "login") {
+window.openAuthModal = function (mode = "signin") {
   const modal = document.getElementById("authModal");
   if (modal) modal.classList.add("show");
-  window.showAuthView(view === "signin" ? "login" : view);
+  mountClerkAuthWidget(mode);
 };
 
 window.closeAuthModal = function () {
@@ -556,716 +678,7 @@ window.closeAuthModal = function () {
   if (modal) modal.classList.remove("show");
 };
 
-function renderOtpBoxes(count = 6) {
-  const row = document.getElementById("otpBoxesRow");
-  if (!row) return;
-  const targetLen = count > 6 ? 8 : 6;
-  row.classList.toggle("len-8", targetLen === 8);
-  const existing = row.querySelectorAll(".otp-digit-box");
-  if (existing.length === targetLen) return;
-  row.innerHTML = Array.from({ length: targetLen }, (_, idx) => {
-    const ac = idx === 0 ? ' autocomplete="one-time-code"' : "";
-    return `<input class="otp-digit-box" type="text" inputmode="numeric" maxlength="1"${ac} aria-label="Digit ${idx + 1}">`;
-  }).join("");
-  bindOtpBoxEvents();
-}
-
-function syncOtpHiddenInput() {
-  const boxes = Array.from(document.querySelectorAll("#otpBoxesRow .otp-digit-box"));
-  const val = boxes.map((b) => (b.value || "").replace(/\D/g, "")).join("");
-  const hidden = document.getElementById("otpCodeInput");
-  if (hidden) hidden.value = val;
-  boxes.forEach((b) => b.classList.toggle("filled", Boolean(b.value)));
-  return val;
-}
-
-function setOtpDigits(rawText) {
-  const digits = String(rawText || "").replace(/\D/g, "").slice(0, 8);
-  if (!digits) return "";
-  if (digits.length > 6) {
-    renderOtpBoxes(8);
-  }
-  const boxes = Array.from(document.querySelectorAll("#otpBoxesRow .otp-digit-box"));
-  boxes.forEach((b, i) => {
-    b.value = digits[i] || "";
-  });
-  const val = syncOtpHiddenInput();
-  if (val.length >= boxes.length) {
-    const submitBtn = document.getElementById("btnVerifyOtp");
-    if (submitBtn) submitBtn.focus();
-  } else if (boxes[val.length]) {
-    boxes[val.length].focus();
-  }
-  return val;
-}
-
-window.clearOtpBoxes = function () {
-  renderOtpBoxes(6);
-  const boxes = document.querySelectorAll("#otpBoxesRow .otp-digit-box");
-  boxes.forEach((b) => {
-    b.value = "";
-    b.classList.remove("filled");
-  });
-  const hidden = document.getElementById("otpCodeInput");
-  if (hidden) hidden.value = "";
-  if (boxes[0]) boxes[0].focus();
-};
-
-window.pasteOtpFromClipboard = async function () {
-  setAuthAlert("otpAlertBox", "");
-  try {
-    if (!navigator.clipboard || !navigator.clipboard.readText) {
-      throw new Error("Clipboard read is not available here — press Ctrl+V directly inside the OTP boxes.");
-    }
-    const text = await navigator.clipboard.readText();
-    const digits = setOtpDigits(text);
-    if (!digits || digits.length < 6) {
-      setAuthAlert("otpAlertBox", "No 6-digit OTP found in your clipboard. Copy the code from your email and try again.", "info");
-      return;
-    }
-    showToast("OTP pasted! Click 'Verify OTP & Continue' to unlock CropSense.");
-  } catch (err) {
-    setAuthAlert("otpAlertBox", err.message || "Press Ctrl+V inside the first OTP box to paste your code.", "info");
-  }
-};
-
-function bindOtpBoxEvents() {
-  const row = document.getElementById("otpBoxesRow");
-  if (!row) return;
-  const boxes = Array.from(row.querySelectorAll(".otp-digit-box"));
-  boxes.forEach((box, idx) => {
-    box.addEventListener("input", (e) => {
-      const cleaned = (e.target.value || "").replace(/\D/g, "");
-      if (cleaned.length > 1) {
-        setOtpDigits(cleaned);
-        return;
-      }
-      e.target.value = cleaned;
-      syncOtpHiddenInput();
-      if (cleaned && boxes[idx + 1]) {
-        boxes[idx + 1].focus();
-      }
-    });
-    box.addEventListener("keydown", (e) => {
-      if (e.key === "Backspace" && !e.target.value && boxes[idx - 1]) {
-        boxes[idx - 1].value = "";
-        boxes[idx - 1].focus();
-        syncOtpHiddenInput();
-      } else if (e.key === "ArrowLeft" && boxes[idx - 1]) {
-        boxes[idx - 1].focus();
-      } else if (e.key === "ArrowRight" && boxes[idx + 1]) {
-        boxes[idx + 1].focus();
-      }
-    });
-    box.addEventListener("paste", (e) => {
-      e.preventDefault();
-      const pasted = (e.clipboardData || window.clipboardData).getData("text");
-      setOtpDigits(pasted);
-    });
-  });
-}
-
-function openOtpScreen(ctx, demoCode = null, deliveryNote = "") {
-  otpContext = ctx;
-  bindOtpBoxEvents();
-  const titleEl = document.getElementById("otpStepTitle");
-  const subEl = document.getElementById("otpStepSub");
-  const previewEl = document.getElementById("otpSmsPreview");
-  const hintEl = document.getElementById("otpSupabaseHint");
-
-  const isEmail = ctx.channel === "email" || ctx.kind.startsWith("supabase");
-  if (titleEl) {
-    titleEl.textContent = isEmail ? "Verify your email" : "Verify your mobile number";
-  }
-  if (subEl) {
-    subEl.textContent = isEmail
-      ? `Open your email (${ctx.destination}), copy the OTP code, and paste it below to continue.`
-      : `Enter the 6-digit SMS verification code sent to +91-${ctx.destination}.`;
-  }
-  if (hintEl) {
-    hintEl.style.display = isEmail ? "block" : "none";
-  }
-  if (previewEl) {
-    if (demoCode) {
-      const badgeLabel = isEmail
-        ? `✉️ Email Verification Preview (${escapeHtml(ctx.destination)})`
-        : `📱 SMS Verification Preview (+91-${escapeHtml(ctx.destination)})`;
-      previewEl.innerHTML = `
-        <div class="auth-sms-preview">
-          <div><b>${badgeLabel}</b></div>
-          <div>
-            <span class="auth-sms-code-chip">${escapeHtml(demoCode)}</span>
-            <button type="button" class="auth-link" onclick="fillSimulatedOtp('${escapeHtml(demoCode)}')">Auto-fill code</button>
-          </div>
-          <div style="opacity:0.8;font-size:11.5px;margin-top:4px">${escapeHtml(deliveryNote)}</div>
-        </div>
-      `;
-    } else {
-      previewEl.innerHTML = "";
-    }
-  }
-  window.showAuthView("otp");
-}
-
-window.fillSimulatedOtp = function (code) {
-  setOtpDigits(code);
-};
-
-window.backFromOtp = function () {
-  const target = (otpContext && otpContext.returnView) || "login";
-  otpContext = null;
-  window.showAuthView(target);
-};
-
-window.sendEmailCodeInstead = async function (email) {
-  if (!window.supabaseClient) {
-    setAuthAlert("loginAlertBox", "Supabase Auth is not configured on this server.");
-    return;
-  }
-  const cleanEmail = (email || "").trim().toLowerCase();
-  const redirectTo = `${window.location.origin}${window.location.pathname}`;
-  const { error } = await window.supabaseClient.auth.signInWithOtp({
-    email: cleanEmail,
-    options: { shouldCreateUser: true, emailRedirectTo: redirectTo },
-  });
-  if (error) {
-    setAuthAlert("loginAlertBox", error.message || "Could not send verification email.");
-    return;
-  }
-  openOtpScreen({ kind: "supabase_login_otp", channel: "email", destination: cleanEmail, returnView: "login" });
-  showToast(`Verification code sent to ${cleanEmail}`);
-};
-
-window.submitLogin = async function (event) {
-  event.preventDefault();
-  const rawId = (document.getElementById("loginIdentifier").value || "").trim();
-  const password = document.getElementById("loginPassword").value || "";
-  const btn = document.getElementById("btnSubmitLogin");
-  setAuthAlert("loginAlertBox", "");
-
-  let id;
-  try {
-    id = classifyIdentifier(rawId);
-  } catch (err) {
-    setAuthAlert("loginAlertBox", err.message);
-    return;
-  }
-
-  if (btn) btn.disabled = true;
-  try {
-    // IDENTITY-FIRST FLOW (default): verify email (Supabase) or phone (SMS) BEFORE asking for password
-    if (!loginUsePassword) {
-      if (id.type === "email") {
-        if (!window.supabaseClient) throw new Error("Supabase Auth is not loaded yet. Please refresh the page.");
-        const redirectTo = `${window.location.origin}${window.location.pathname}`;
-        const { error } = await window.supabaseClient.auth.signInWithOtp({
-          email: id.value,
-          options: { shouldCreateUser: true, emailRedirectTo: redirectTo },
-        });
-        if (error) throw new Error(error.message || "Could not send email verification code.");
-        openOtpScreen({
-          kind: "supabase_login_otp",
-          channel: "email",
-          destination: id.value,
-          returnView: "login",
-        });
-        showToast(`Verification code sent to ${id.value}`);
-        return;
-      }
-
-      // Phone number: check if returning user or brand-new user
-      const checkResp = await fetch(`${API_BASE}/api/auth/check`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: id.value }),
-      });
-      const checkData = await checkResp.json();
-      if (checkResp.ok && checkData.exists) {
-        setLoginPasswordMode(true);
-        setAuthAlert("loginAlertBox", "Account found! Enter your password to continue.", "info");
-        const pwEl = document.getElementById("loginPassword");
-        if (pwEl) pwEl.focus();
-        return;
-      }
-
-      // Brand-new phone user -> authenticate via 6-digit SMS OTP BEFORE asking for password
-      const startResp = await fetch(`${API_BASE}/api/auth/otp/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: id.value }),
-      });
-      const startData = await startResp.json();
-      if (!startResp.ok) throw new Error(startData.detail || "Could not send SMS verification code.");
-      openOtpScreen(
-        {
-          kind: "local_pre_auth",
-          channel: "sms",
-          destination: startData.destination,
-          challengeId: startData.challenge_id,
-          returnView: "login",
-        },
-        startData.demo_otp_code,
-        startData.delivery_note
-      );
-      showToast(`6-digit SMS verification code sent to +91-${startData.destination}`);
-      return;
-    }
-
-    // PASSWORD MODE (for returning users who prefer password — STILL enforces Email OTP before unlocking!)
-    if (id.type === "email") {
-      if (!window.supabaseClient) throw new Error("Supabase Auth is not loaded yet. Please refresh the page.");
-      const { data, error } = await window.supabaseClient.auth.signInWithPassword({
-        email: id.value,
-        password,
-      });
-      if (error) {
-        const safeEmail = escapeHtml(id.value);
-        setAuthAlert(
-          "loginAlertBox",
-          error.message || "Invalid email or password.",
-          "error",
-          `<div style="margin-top:8px"><button type="button" class="auth-link" onclick="sendEmailCodeInstead('${safeEmail}')">Send an Email OTP to ${safeEmail} instead →</button></div>`
-        );
-        return;
-      }
-      if (data && data.session) {
-        // Enforce mandatory Email OTP rule: clear step-1 session & send fresh Email OTP to paste
-        await window.supabaseClient.auth.signOut({ scope: "local" });
-        const redirectTo = `${window.location.origin}${window.location.pathname}`;
-        const { error: otpErr } = await window.supabaseClient.auth.signInWithOtp({
-          email: id.value,
-          options: { shouldCreateUser: false, emailRedirectTo: redirectTo },
-        });
-        if (otpErr) throw new Error(otpErr.message || "Password verified, but could not send Email OTP.");
-        openOtpScreen({
-          kind: "supabase_login_otp",
-          channel: "email",
-          destination: id.value,
-          returnView: "login",
-        });
-        showToast(`Password verified! Open ${id.value}, copy the OTP, and paste it here.`);
-      }
-      return;
-    }
-
-    // Returning Phone + Password
-    const resp = await fetch(`${API_BASE}/api/auth/signin`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier: id.value, password }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      if (resp.status === 404) {
-        const startResp = await fetch(`${API_BASE}/api/auth/otp/start`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ identifier: id.value }),
-        });
-        const startData = await startResp.json();
-        if (!startResp.ok) throw new Error(startData.detail || "Could not send SMS verification code.");
-        openOtpScreen(
-          {
-            kind: "local_pre_auth",
-            channel: "sms",
-            destination: startData.destination,
-            challengeId: startData.challenge_id,
-            returnView: "login",
-          },
-          startData.demo_otp_code,
-          startData.delivery_note
-        );
-        showToast("New mobile number detected — verify your number first.");
-        return;
-      }
-      throw new Error(data.detail || "Sign in failed.");
-    }
-    if (data.requires_otp) {
-      openOtpScreen(
-        {
-          kind: "local_signin",
-          channel: data.channel,
-          destination: data.destination,
-          challengeId: data.challenge_id,
-          returnView: "login",
-        },
-        data.demo_otp_code,
-        data.delivery_note
-      );
-      showToast(`Enter the 6-digit verification code sent to ${data.destination}`);
-    }
-  } catch (err) {
-    setAuthAlert("loginAlertBox", err.message || "Unable to continue.");
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-};
-
-window.submitSignup = async function (event) {
-  event.preventDefault();
-  const firstName = (document.getElementById("signupFirstName").value || "").trim();
-  const lastName = (document.getElementById("signupLastName").value || "").trim();
-  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
-  const rawId = (document.getElementById("signupIdentifier").value || "").trim();
-  const termsEl = document.getElementById("signupTerms");
-  const btn = document.getElementById("btnSubmitSignup");
-  setAuthAlert("signupAlertBox", "");
-
-  if (fullName.length < 2) {
-    setAuthAlert("signupAlertBox", "Please enter your name (at least 2 characters).");
-    return;
-  }
-  if (termsEl && !termsEl.checked) {
-    setAuthAlert("signupAlertBox", "Please agree to the Terms & Conditions to continue.");
-    return;
-  }
-
-  let id;
-  try {
-    id = classifyIdentifier(rawId);
-  } catch (err) {
-    setAuthAlert("signupAlertBox", err.message);
-    return;
-  }
-
-  if (btn) btn.disabled = true;
-  try {
-    // Pre-password verification via Supabase Email OTP or Local SMS OTP
-    if (id.type === "email") {
-      if (!window.supabaseClient) throw new Error("Supabase Auth is not loaded yet. Please refresh the page.");
-      const redirectTo = `${window.location.origin}${window.location.pathname}`;
-      const { error } = await window.supabaseClient.auth.signInWithOtp({
-        email: id.value,
-        options: {
-          shouldCreateUser: true,
-          emailRedirectTo: redirectTo,
-          data: { full_name: fullName },
-        },
-      });
-      if (error) throw new Error(error.message || "Could not send verification email.");
-      openOtpScreen({
-        kind: "supabase_signup_otp",
-        channel: "email",
-        destination: id.value,
-        fullName,
-        returnView: "signup",
-      });
-      showToast(`Verification code sent to ${id.value}`);
-      return;
-    }
-
-    const startResp = await fetch(`${API_BASE}/api/auth/otp/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier: id.value, full_name: fullName }),
-    });
-    const startData = await startResp.json();
-    if (!startResp.ok) throw new Error(startData.detail || "Could not send SMS verification code.");
-    openOtpScreen(
-      {
-        kind: "local_pre_auth",
-        channel: "sms",
-        destination: startData.destination,
-        fullName,
-        challengeId: startData.challenge_id,
-        returnView: "signup",
-      },
-      startData.demo_otp_code,
-      startData.delivery_note
-    );
-    showToast(`6-digit SMS verification code sent to +91-${startData.destination}`);
-  } catch (err) {
-    setAuthAlert("signupAlertBox", err.message || "Could not start verification.");
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-};
-
-window.submitForgotEmail = async function (event) {
-  event.preventDefault();
-  const email = (document.getElementById("forgotEmailInput").value || "").trim().toLowerCase();
-  const btn = document.getElementById("btnSubmitForgot");
-  setAuthAlert("forgotAlertBox", "");
-
-  if (!window.supabaseClient) {
-    setAuthAlert("forgotAlertBox", "Supabase Auth is not loaded yet.");
-    return;
-  }
-  if (btn) btn.disabled = true;
-  try {
-    const redirectTo = `${window.location.origin}${window.location.pathname}`;
-    const { error } = await window.supabaseClient.auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: false, emailRedirectTo: redirectTo },
-    });
-    if (error) throw new Error(error.message || "Could not send verification code.");
-    openOtpScreen({
-      kind: "supabase_reset_otp",
-      channel: "email",
-      destination: email,
-      returnView: "forgot",
-    });
-    showToast(`Verification code sent to ${email}`);
-  } catch (err) {
-    setAuthAlert("forgotAlertBox", err.message);
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-};
-
-window.submitVerifyOtp = async function (event) {
-  event.preventDefault();
-  const code = syncOtpHiddenInput();
-  const btn = document.getElementById("btnVerifyOtp");
-  setAuthAlert("otpAlertBox", "");
-
-  if (!otpContext) {
-    window.showAuthView("login");
-    return;
-  }
-  if (code.length < 6 || code.length > 8) {
-    setAuthAlert("otpAlertBox", "Please enter or paste the 6-digit OTP code from your email or SMS.");
-    return;
-  }
-
-  if (btn) btn.disabled = true;
-  try {
-    if (
-      otpContext.kind === "supabase_login_otp" ||
-      otpContext.kind === "supabase_signup_otp" ||
-      otpContext.kind === "supabase_reset_otp"
-    ) {
-      let verifyResult = await window.supabaseClient.auth.verifyOtp({
-        email: otpContext.destination,
-        token: code,
-        type: "email",
-      });
-      if (verifyResult.error || !verifyResult.data?.session) {
-        // Fallback for Supabase signup/magiclink confirmation tokens
-        for (const fallbackType of ["signup", "magiclink"]) {
-          const retry = await window.supabaseClient.auth.verifyOtp({
-            email: otpContext.destination,
-            token: code,
-            type: fallbackType,
-          });
-          if (!retry.error && retry.data?.session) {
-            verifyResult = retry;
-            break;
-          }
-        }
-      }
-      const { data, error } = verifyResult;
-      if (error || !data?.session) {
-        throw new Error(error?.message || "Invalid or expired OTP code. Please check your email or click Resend OTP.");
-      }
-
-      // After verifying email on Create Account or Forgot/Set Password -> prompt to create/set password!
-      if (otpContext.kind === "supabase_signup_otp" || otpContext.kind === "supabase_reset_otp") {
-        const existingName = (otpContext.fullName || data.user?.user_metadata?.full_name || "").trim();
-        setPasswordContext = {
-          kind: "supabase_set_password",
-          destination: otpContext.destination,
-          fullName: existingName,
-          session: data.session,
-        };
-        document.getElementById("setPasswordVerifiedChip").textContent = `✓ Verified ${otpContext.destination}`;
-        document.getElementById("setPasswordTitle").textContent =
-          otpContext.kind === "supabase_reset_otp" ? "Set your new password" : "Create your password";
-        document.getElementById("setPasswordSub").textContent =
-          "Your email is verified via Supabase. Set a password (at least 6 characters) to finish.";
-        const nameWrap = document.getElementById("setPasswordNameWrap");
-        const nameInput = document.getElementById("setPasswordFullName");
-        if (existingName.length >= 2 || otpContext.kind === "supabase_reset_otp") {
-          nameWrap.style.display = "none";
-          nameInput.required = false;
-          nameInput.value = existingName;
-        } else {
-          nameWrap.style.display = "block";
-          nameInput.required = true;
-          nameInput.value = "";
-        }
-        window.showAuthView("setPassword");
-        return;
-      }
-
-      await finalizeSupabaseSignIn(data.session, `Verified! Welcome, ${normalizeSupabaseUser(data.user).full_name}.`);
-      return;
-    }
-
-    if (otpContext.kind === "local_pre_auth") {
-      const resp = await fetch(`${API_BASE}/api/auth/otp/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ challenge_id: otpContext.challengeId, otp_code: code }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || "Invalid verification code.");
-
-      if (data.needs_password) {
-        const existingName = (data.full_name || otpContext.fullName || "").trim();
-        const destLabel = `+91-${data.destination}`;
-        setPasswordContext = {
-          kind: "local_complete",
-          destination: data.destination,
-          fullName: existingName,
-          token: data.verification_token,
-        };
-        document.getElementById("setPasswordVerifiedChip").textContent = `✓ Verified ${destLabel}`;
-        document.getElementById("setPasswordTitle").textContent = "Create your password";
-        document.getElementById("setPasswordSub").textContent =
-          "Your mobile number is verified. Set a password to complete your CropSense account.";
-        const nameWrap = document.getElementById("setPasswordNameWrap");
-        const nameInput = document.getElementById("setPasswordFullName");
-        if (existingName.length >= 2) {
-          nameWrap.style.display = "none";
-          nameInput.required = false;
-          nameInput.value = existingName;
-        } else {
-          nameWrap.style.display = "block";
-          nameInput.required = true;
-          nameInput.value = "";
-        }
-        window.showAuthView("setPassword");
-        return;
-      }
-
-      await finalizeLocalPhoneSignIn(data.user, data.token, data.message || "Welcome back!");
-      return;
-    }
-
-    if (otpContext.kind === "local_signin") {
-      const resp = await fetch(`${API_BASE}/api/auth/verify-otp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ challenge_id: otpContext.challengeId, otp_code: code }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || "Invalid verification code.");
-      await finalizeLocalPhoneSignIn(data.user, data.token, data.message || "Signed in!");
-    }
-  } catch (err) {
-    setAuthAlert("otpAlertBox", err.message || "Verification failed.");
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-};
-
-window.resendOtpCode = async function () {
-  if (!otpContext) return;
-  const btn = document.getElementById("btnResendOtp");
-  if (btn) btn.disabled = true;
-  setAuthAlert("otpAlertBox", "");
-  try {
-    if (otpContext.kind.startsWith("supabase_")) {
-      const redirectTo = `${window.location.origin}${window.location.pathname}`;
-      const { error } = await window.supabaseClient.auth.signInWithOtp({
-        email: otpContext.destination,
-        options: {
-          shouldCreateUser: otpContext.kind !== "supabase_reset_otp",
-          emailRedirectTo: redirectTo,
-          ...(otpContext.fullName ? { data: { full_name: otpContext.fullName } } : {}),
-        },
-      });
-      if (error) throw new Error(error.message || "Could not resend verification code.");
-      setAuthAlert("otpAlertBox", `A fresh verification code was sent to ${otpContext.destination}.`, "success");
-    } else if (otpContext.challengeId) {
-      const resp = await fetch(`${API_BASE}/api/auth/resend-otp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ challenge_id: otpContext.challengeId }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || "Could not resend SMS code.");
-      otpContext.challengeId = data.challenge_id;
-      openOtpScreen(otpContext, data.demo_otp_code, data.delivery_note);
-      setAuthAlert("otpAlertBox", "A fresh 6-digit SMS code has been generated.", "success");
-    }
-  } catch (err) {
-    setAuthAlert("otpAlertBox", err.message || "Could not resend code.");
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-};
-
-window.submitSetPassword = async function (event) {
-  event.preventDefault();
-  if (!setPasswordContext) {
-    window.showAuthView("login");
-    return;
-  }
-  const password = document.getElementById("setPasswordInput").value || "";
-  const fullNameInput = (document.getElementById("setPasswordFullName").value || "").trim();
-  const btn = document.getElementById("btnSubmitSetPassword");
-  setAuthAlert("setPasswordAlertBox", "");
-
-  if (password.length < 6) {
-    setAuthAlert("setPasswordAlertBox", "Password must be at least 6 characters.");
-    return;
-  }
-
-  if (btn) btn.disabled = true;
-  try {
-    if (setPasswordContext.kind === "supabase_set_password") {
-      const finalName = fullNameInput || setPasswordContext.fullName;
-      const updatePayload = { password };
-      if (finalName && finalName.length >= 2) {
-        updatePayload.data = { full_name: finalName };
-      }
-      const { error } = await window.supabaseClient.auth.updateUser(updatePayload);
-      if (error) throw new Error(error.message || "Could not save password.");
-
-      const { data: sessData } = await window.supabaseClient.auth.getSession();
-      const activeSession = (sessData && sessData.session) || setPasswordContext.session;
-      if (activeSession) {
-        await finalizeSupabaseSignIn(activeSession, "Password saved! Welcome to CropSense.");
-        return;
-      }
-      document.getElementById("loginIdentifier").value = setPasswordContext.destination;
-      setLoginPasswordMode(true);
-      window.showAuthView("login");
-      setAuthAlert("loginAlertBox", "Password saved! You can now log in.", "success");
-      return;
-    }
-
-    if (setPasswordContext.kind === "local_complete") {
-      const finalName = fullNameInput || setPasswordContext.fullName;
-      if (!finalName || finalName.length < 2) {
-        throw new Error("Please enter your full name (at least 2 characters).");
-      }
-      const resp = await fetch(`${API_BASE}/api/auth/otp/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          verification_token: setPasswordContext.token,
-          password,
-          full_name: finalName,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || "Could not complete account setup.");
-      await finalizeLocalPhoneSignIn(data.user, data.token, data.message || "Account created!");
-    }
-  } catch (err) {
-    setAuthAlert("setPasswordAlertBox", err.message || "Could not save password.");
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-};
-
-window.logoutFarmer = async function () {
-  try {
-    if (state.authProvider === "supabase" && window.supabaseClient) {
-      await window.supabaseClient.auth.signOut();
-    } else if (state.authToken) {
-      await fetch(`${API_BASE}/api/auth/logout`, {
-        method: "POST",
-        headers: authHeaders(),
-      });
-    }
-  } catch (e) {
-    // ignore network error on logout
-  }
-
+function clearSignedOutState(showMsg = true) {
   state.authToken = null;
   state.currentUser = null;
   state.authProvider = null;
@@ -1278,10 +691,6 @@ window.logoutFarmer = async function () {
   state.riskResult = null;
   state.advisoryResult = null;
   state.calendarResult = null;
-  otpContext = null;
-  setPasswordContext = null;
-
-  sessionStorage.removeItem("cropsense_phone_token");
   localStorage.removeItem("cropsense_active_farm_id");
 
   renderActiveFarmBanner();
@@ -1292,9 +701,19 @@ window.logoutFarmer = async function () {
 
   syncAuthLockState();
   renderAuthSidebar();
-  setLoginPasswordMode(false);
-  window.showAuthView("login");
-  showToast("Signed out securely.");
+  if (showMsg) showToast("Signed out securely.");
+}
+
+window.logoutFarmer = async function () {
+  try {
+    if (window.clerk) {
+      await window.clerk.signOut();
+    }
+  } catch (e) {
+    // ignore network error on logout
+  }
+  clearSignedOutState(true);
+  mountClerkAuthWidget("signin");
 };
 
 function renderSoilInputs() {
@@ -1375,7 +794,7 @@ async function loadFarms() {
   if (!state.authToken) return;
   try {
     const resp = await fetch(`${API_BASE}/api/farms`, { headers: await authHeadersAsync() });
-    if (handleUnauthorizedResponse(resp)) return;
+    if (await handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) return;
     const data = await resp.json();
     state.farms = data.farms || [];
@@ -1558,7 +977,7 @@ window.deleteFarmById = async function (id) {
       method: "DELETE",
       headers: await authHeadersAsync(),
     });
-    if (handleUnauthorizedResponse(resp)) return;
+    if (await handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) throw new Error("Failed to delete farm");
     if (state.activeFarm && String(state.activeFarm.id) === String(id)) {
       state.activeFarm = null;
@@ -1762,7 +1181,7 @@ window.saveFarmProfile = async function () {
       headers: await authHeadersAsync({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorizedResponse(resp)) return;
+    if (await handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) {
       const errData = await resp.json().catch(() => ({}));
       throw new Error(errData.detail || "Could not save farm");
@@ -2670,7 +2089,7 @@ window.runFullAdvisory = async function (saveToHistory = true) {
       headers: await authHeadersAsync({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     });
-    if (handleUnauthorizedResponse(resp)) return;
+    if (await handleUnauthorizedResponse(resp)) return;
     const data = await resp.json();
     if (!resp.ok) {
       throw new Error(data.detail || "Could not generate advisory");
@@ -2935,21 +2354,46 @@ window.copyAdvisoryForWhatsApp = async function () {
 // Dashboard & History
 // -------------------------
 
-function updateJourneyStrip() {
-  const jFarm = document.getElementById("jStepFarm");
-  const jCrop = document.getElementById("jStepCrop");
-  const jSoil = document.getElementById("jStepSoil");
-  const jAdv = document.getElementById("jStepAdv");
+function updateJourneyStrip(activePageId = state.activePage || "dashboard") {
+  const steps = [
+    {
+      card: document.getElementById("stepCardFarm"),
+      num: document.getElementById("stepNumFarm"),
+      index: "1",
+      page: "farm",
+      done: Boolean(state.activeFarm && state.activeFarm.latitude != null),
+    },
+    {
+      card: document.getElementById("stepCardCrop"),
+      num: document.getElementById("stepNumCrop"),
+      index: "2",
+      page: "analysis",
+      done: Boolean(state.cropResult && state.cropResult.available),
+    },
+    {
+      card: document.getElementById("stepCardSoil"),
+      num: document.getElementById("stepNumSoil"),
+      index: "3",
+      page: "soil",
+      done: Boolean(state.soilResult && state.soilResult.available),
+    },
+    {
+      card: document.getElementById("stepCardAdv"),
+      num: document.getElementById("stepNumAdv"),
+      index: "4",
+      page: "advisory",
+      done: Boolean(state.advisoryResult && state.riskResult),
+    },
+  ];
 
-  const farmDone = Boolean(state.activeFarm && state.activeFarm.latitude != null);
-  const cropDone = Boolean(state.cropResult && state.cropResult.available);
-  const soilDone = Boolean(state.soilResult && state.soilResult.available);
-  const advDone = Boolean(state.advisoryResult && state.riskResult);
-
-  if (jFarm) jFarm.classList.toggle("done", farmDone);
-  if (jCrop) jCrop.classList.toggle("done", cropDone);
-  if (jSoil) jSoil.classList.toggle("done", soilDone);
-  if (jAdv) jAdv.classList.toggle("done", advDone);
+  steps.forEach((s) => {
+    if (!s.card) return;
+    s.card.classList.toggle("done", s.done);
+    s.card.classList.toggle("current", activePageId === s.page);
+    if (s.num) {
+      s.num.textContent = s.done ? "✓" : s.index;
+    }
+  });
 }
 
 function updateDashboardView() {
@@ -3080,9 +2524,27 @@ function updateDashboardView() {
       `;
     } else {
       dashAdvBox.innerHTML = `
-        <div class="empty-state">
-          Upload a leaf photo, enter Soil Health Card values, or load farm weather, then click
-          <b>"Generate & Save Full Advisory"</b> to see tailored recommendations here.
+        <div class="empty-state" style="text-align:left;padding:16px">
+          <div style="font-weight:700;color:var(--green-dark);margin-bottom:4px">Get started in 4 simple steps</div>
+          <div class="sub">Pick any step below to begin, then click <b>"Generate &amp; Save Full Advisory"</b>.</div>
+          <div class="quick-actions-grid">
+            <button type="button" class="quick-action-tile" onclick="switchPage('farm')">
+              <div class="qa-icon">📍</div>
+              <div><b>1. Set Farm Location</b><span>GPS, village search &amp; map area</span></div>
+            </button>
+            <button type="button" class="quick-action-tile" onclick="switchPage('analysis')">
+              <div class="qa-icon">🍃</div>
+              <div><b>2. Scan Crop Leaf</b><span>AI disease check + Grad-CAM</span></div>
+            </button>
+            <button type="button" class="quick-action-tile" onclick="switchPage('soil')">
+              <div class="qa-icon">🧪</div>
+              <div><b>3. Enter Soil Card</b><span>12-parameter nutrient score</span></div>
+            </button>
+            <button type="button" class="quick-action-tile" onclick="switchPage('newfarm')">
+              <div class="qa-icon">🌱</div>
+              <div><b>Start a New Farm</b><span>Beginner crop &amp; budget guide</span></div>
+            </button>
+          </div>
         </div>
       `;
     }
@@ -3096,7 +2558,7 @@ window.loadHistory = async function () {
     const resp = await fetch(`${API_BASE}/api/assessments${farmQuery}`, {
       headers: await authHeadersAsync(),
     });
-    if (handleUnauthorizedResponse(resp)) return;
+    if (await handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) return;
     const data = await resp.json();
     state.assessments = data.assessments || [];
@@ -3207,7 +2669,7 @@ window.viewAssessmentDetail = async function (id) {
     const resp = await fetch(`${API_BASE}/api/assessments/${encodeURIComponent(id)}`, {
       headers: await authHeadersAsync(),
     });
-    if (handleUnauthorizedResponse(resp)) return;
+    if (await handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) throw new Error("Could not load assessment");
     const rec = await resp.json();
     if (rec.details && rec.advisory) {
@@ -3228,7 +2690,7 @@ window.deleteAssessmentById = async function (id) {
       method: "DELETE",
       headers: await authHeadersAsync(),
     });
-    if (handleUnauthorizedResponse(resp)) return;
+    if (await handleUnauthorizedResponse(resp)) return;
     if (!resp.ok) throw new Error("Failed to delete assessment");
     await loadHistory();
     updateDashboardView();

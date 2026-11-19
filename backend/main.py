@@ -67,6 +67,12 @@ from backend.services.auth_service import (
     verify_pre_password_otp,
 )
 from backend.services.calendar_service import get_crop_calendar, parse_soil_card_text
+from backend.services.clerk_service import (
+    ClerkAuthError,
+    get_clerk_public_config,
+    is_clerk_configured,
+    verify_clerk_token,
+)
 from backend.services.crop_service import (
     analyze_crop_image,
     analyze_sample_leaf,
@@ -297,6 +303,17 @@ def api_save_sender_settings(req: AuthSenderConfigRequest):
     )
 
 
+@app.get("/api/config/clerk")
+def api_clerk_public_config():
+    """Return ONLY safe public Clerk config (publishableKey + frontendApi). Never exposes secret key."""
+    cfg = get_clerk_public_config()
+    return {
+        "configured": is_clerk_configured(),
+        "publishableKey": cfg["publishableKey"],
+        "frontendApi": cfg["frontendApi"],
+    }
+
+
 @app.get("/api/config/supabase")
 def api_supabase_public_config():
     """Return ONLY public Supabase Auth config (URL + publishable key) from .env.local."""
@@ -331,6 +348,12 @@ def _resolve_user_auth(authorization: Optional[str], required: bool = True) -> d
     if raw_token:
         # JWT tokens have 3 dot-separated segments
         if raw_token.count(".") == 2:
+            if is_clerk_configured():
+                try:
+                    clerk_user = verify_clerk_token(authorization)
+                    return {"mode": "local", "provider": "clerk", "user": clerk_user, "token": raw_token}
+                except ClerkAuthError as exc:
+                    raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
             if is_supabase_configured():
                 try:
                     sb_user = verify_supabase_token(authorization)

@@ -3,10 +3,14 @@
   "private": true,
   "description": "Bundles @insforge/sdk for the CropSense vanilla JS frontend",
   "scripts": {
-    "build:sdk": "esbuild frontend/js/insforge-entry.js --bundle --format=iife --global-name=InsForgeSDK --platform=browser --external:crypto --minify --outfile=frontend/js/insforge-sdk.bundle.js"
+    "build:sdk": "esbuild frontend/js/insforge-entry.js --bundle --format=iife --global-name=InsForgeSDK --platform=browser --external:crypto --minify --outfile=frontend/js/insforge-sdk.bundle.js",
+    "build:supabase": "esbuild frontend/js/supabase-entry.js --bundle --format=iife --global-name=SupabaseSDK --platform=browser --minify --outfile=frontend/js/supabase-sdk.bundle.js",
+    "build:clerk": "esbuild frontend/js/clerk-entry.js --bundle --format=iife --global-name=ClerkSDK --platform=browser --minify --outfile=frontend/js/clerk-sdk.bundle.js"
   },
   "dependencies": {
-    "@insforge/sdk": "latest"
+    "@clerk/clerk-js": "^6.46.0",
+    "@insforge/sdk": "latest",
+    "@supabase/supabase-js": "^2.119.1"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"
